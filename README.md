@@ -1,2 +1,2 @@
-# backmyslak
+# backmyslack
 Incremental Backups made Easy
