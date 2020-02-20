@@ -1,0 +1,285 @@
+#!/bin/sh
+#
+#backmyslack
+#
+#By Giuseppe Molinaro "Salvor Hardin"
+# giuseppe.molinaro<at>gmx.com
+#
+#Script per eseguire un semplice backup incrementale usando rsync.
+#Alla fine dell'esecuzione di rsync, il suo exit status viene letto
+#ed utilizzato per scrivere in un log file nella forma:
+#
+#inizio esecuzione | termine esecuzione | exit status message
+#
+#Infine il logfile viene aperto nello stesso terminale in cui è stato 
+#lanciato lo script, con una chiamata a tail, in modo da ottenere un
+#riscontro immediato del risultato dell'operazione.
+#
+#
+#Feel free to use or modify this script, just give me some credits.
+#
+# Thanks to Mikes Handy and his webpage
+# http://www.mikerubel.org/computers/rsync_snapshots/
+# Most of this code has been taken/adapted/inspired by his script:
+# "rotating-filesystem-snapshot utility"
+# Many thanks to all the people who contribued to his original script 
+# too (list on the Handy's webpage).
+
+SNAME="backmyslack"
+VERSION="v0.2a4 alpha"
+
+#--------------System commands and utilities used by this script --------------#
+
+ID_CMD=/usr/bin/id;
+ECHO_CMD=/bin/echo;
+
+RM_CMD=/bin/rm;
+MV_CMD=/bin/mv;
+
+MKDIR_CMD=/bin/mkdir;
+CHMOD_CMD=/bin/chmod;
+CHOWN_CMD=/bin/chown;
+
+DATE_CMD=/bin/date;
+TAIL_CMD=/usr/bin/tail;
+CAT_CMD=/bin/cat;
+
+IONICE_CMD=/usr/bin/ionice;
+RSYNC=/usr/bin/rsync;
+
+RSYNC_CMD="$IONICE_CMD -c3 $RSYNC"
+
+#--------------File Locations -------------------------------------------------#
+
+ORIG=/
+DESTDIR=/run/media/hardin/cryptbk-black/
+LOGDIR=/home/hardin/lRepo/utilBK/
+
+#-----------------Special files and directories -------------------------------#
+
+# Checking rsync exclusion list, if no list is found, create an empty one 
+if [ ! -f "$LOGDIR"/exclude.conf ]; then
+  $ECHO_CMD "# rsync exclusion file">"$LOGDIR"/exclude.conf
+fi
+
+# Checking for last backup date. Initialize history if none is found.
+NEW=$($DATE_CMD +"%Y%m%d-%H%M")
+if [ ! -f $DESTDIR/last ]; then
+    $ECHO_CMD $NEW>"$DESTDIR"/last
+fi
+
+# Retrieving last backup date and directory name
+OLDBK=$($CAT_CMD $DESTDIR/last)
+OLDDIR=$OLDBK
+
+#-----------------Command Options----------------------------------------------#
+EXFILE="$LOGDIR/exclude.conf"
+# -n,--dry-run usare --stats invece di -vv ...uhm...
+#--out-formt=FORMAT
+# FORMAT=
+RSYNC_OPT="-azhv --stats --info=name0 --info=progress2 --del --exclude-from=$EXFILE"
+
+#------------------Functions --------------------------------------------------#
+
+function line {
+  COUNTER=0
+  printf "+"
+    while [  $COUNTER -lt 80 ]; do
+      printf "="
+      let COUNTER=COUNTER+1
+    done
+  printf "+\n"
+}
+ 
+function subline {
+  COUNTER=0
+  printf "+"
+    while [ $COUNTER -lt 80 ]; do
+      printf "-"
+      let COUNTER=COUNTER+1
+    done
+  printf "+\n"
+}
+
+function errline {
+  COUNTER=0
+  printf "!!>"
+    while [ $COUNTER -lt 76 ]; do
+     printf "-"
+     let COUNTER=COUNTER+1
+    done
+  printf "<!!\n"
+}
+
+function blankline {
+  $ECHO_CMD ""
+}
+#------------------Script's Body ----------------------------------------------#
+
+# Let the user know when the backup process is starting
+BEGIN=$($DATE_CMD "+%a %x %X")
+line
+$ECHO_CMD "|   Backup starting on "$BEGIN" "
+line
+blankline
+$ECHO_CMD "# "$SNAME"-"$VERSION
+blankline
+
+# make sure we're running as root
+$ECHO_CMD "# Checking for root..."
+if [[ $($ID_CMD -u) != 0 ]]; then
+  {
+    blankline
+    errline
+    $ECHO_CMD "!!   Sorry, must be root.  Aborting...";
+    errline
+    blankline
+    exit
+  }
+else
+  $ECHO_CMD " > OK"
+  blankline
+fi
+
+# Change permissions and move to workdir:
+if [ -d $DESTDIR ]; then
+  $ECHO_CMD "# Fixing permissions..."
+  $CHOWN_CMD root:root $DESTDIR && $CHMOD_CMD 705 $DESTDIR
+  $ECHO_CMD "# Moving to workdir:"$DESTDIR"..."
+  cd $DESTDIR
+  blankline
+else
+  blankline
+  errline
+  $ECHO_CMD "!!   "$DESTDIR" Not Found. Aborting..."
+  errline
+  blankline
+  exit
+fi
+
+# Starting proper backup procedure:
+
+# Check for previous backups, and populate the history.
+#  If a previos, non "old", backup exist, 
+#  rename it to old and make a hard-link-only (except for dirs)
+#  copy to Initialize the current back up.
+#  If No previous backup exist, create an empy dir for the current one.
+# Also, register the exit status of rsync for the logfile and error detection.
+$ECHO_CMD "# Looking for previous backups..."
+if [ -d "$OLDDIR" ]; then
+  if [ -d old ]; then
+    if [ -d archived ]; then
+     AGE=$($CAT_CMD archived/AGE.TXT)
+     $ECHO_CMD -e " > Obsolete archive found: "$AGE "\n   removing it..."
+     $RM_CMD -r archived
+    fi
+   AGE=$($CAT_CMD old/AGE.TXT)
+   $ECHO_CMD -e " > Old backup found: "$AGE "\n   moving it to archive..."
+   $MV_CMD old archived
+  fi
+ $ECHO_CMD " > Last backup: " $OLDBK
+ $MV_CMD "$OLDDIR" old
+ $ECHO_CMD $OLDBK>old/AGE.TXT
+ $ECHO_CMD " > Creating Incremental backup in:" $NEW"..."
+ blankline
+ $RSYNC_CMD $RSYNC_OPT --link-dest="$DESTDIR"/old "$ORIG"/ "$DESTDIR"/$NEW/
+ EXIT=$($ECHO_CMD $?)
+else
+  $ECHO_CMD "# No previous backups found."
+  $ECHO_CMD " > A full backup will be created."
+  blankline
+  $RSYNC_CMD $RSYNC_OPT "$ORIG"/ "$DESTDIR"/$NEW/
+  EXIT=$($ECHO_CMD $?)
+fi
+# Update the last backup file.
+$ECHO_CMD $NEW>"$DESTDIR"/last
+blankline
+
+$ECHO_CMD "# Fixing Permissions..."
+$CHOWN_CMD root:root $DESTDIR && $CHMOD_CMD 505 $DESTDIR
+END=$($DATE_CMD +%X)
+$ECHO_CMD "# Backup procedure ended, preparing for feedback..."
+blankline
+
+#--------------- logfile creation ---------------------------------------------#
+
+# let's check the meaning of that exit status...
+case "$EXIT" in
+	0)
+		ES="Success"
+		;;
+	1)
+		ES="¡ERROR! 1 Syntax or usage error"
+		;;
+	2)
+		ES="¡ERROR! 2 Protocol incompatibility"
+		;;
+	3)
+		ES="¡ERROR! 3 Errors selecting input/output files, dirs"
+		;;
+	4)
+		ES="¡ERROR! 4 Requested  action  not supported"
+		;;
+	5)
+		ES="¡ERROR! 5 Error starting client-server protocol"
+		;;
+	6)
+		ES="¡ERROR! 6 Daemon unable to append to log-file"
+		;;
+	10)
+		ES="¡ERROR! 10 Error in socket I/O"
+		;;
+	11)
+		ES="¡ERROR! 11 Error in file I/O"
+		;;
+	12)
+		ES="¡ERROR! 12 Error in rsync protocol data stream"
+		;;
+	13)
+		ES="¡ERROR! 13 Errors with program diagnostics"
+		;;
+	14)
+		ES="¡ERROR! 14 Error in IPC code"
+		;;
+	20)
+		ES="¡ERROR! 20 Received SIGUSR1 or SIGINT"
+		;;
+	21)
+		ES="¡ERROR! 21 Some error returned by waitpid()"
+		;;
+	22)
+		ES="¡ERROR! 22 Error allocating core memory buffers"
+		;;
+	23)
+		ES="¡ERROR! 23 Partial transfer due to error"
+		;;
+	24)
+		ES="¡ERROR! 24 Partial transfer due to vanished source files"
+		;;
+	25)
+		ES="¡ERROR! 25 The --max-delete limit stopped deletions"
+		;;
+	30)
+		ES="¡ERROR! 30 Timeout in data send/receive"
+		;;
+	35)
+		ES="¡ERROR! 35 Timeout waiting for daemon connection"
+		;;
+	*)
+		ES="¡WTF! dunno what happen, sorry man."
+		;;
+esac
+
+# add a new line to the logfile:
+$ECHO_CMD "|  ""$BEGIN | $END | $ES">>$LOGDIR/backup.log
+
+# ----------- real time feedback ----------------------------------------------#
+
+# show me last logfile's lines.
+line
+$ECHO_CMD "|  Operation completed."
+subline
+$TAIL_CMD -n1 $LOGDIR/backup.log
+line
+# and that's it
+exit 0
