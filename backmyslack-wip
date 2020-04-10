@@ -3,7 +3,7 @@
 #backmyslack
 #
 #By Giuseppe Molinaro "Salvor Hardin"
-# giuseppe.molinaro<at>gmx.com
+# g.molinaro@linuxmail.org 
 #
 #Script per eseguire un semplice backup incrementale usando rsync.
 #Alla fine dell'esecuzione di rsync, il suo exit status viene letto
