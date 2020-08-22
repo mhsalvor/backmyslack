@@ -1,7 +1,6 @@
 /bin
 /dev
 /home/*/.gvfs
-#/home/*/WinDesk
 /lib
 /lib64
 /lost+found
