@@ -29,34 +29,39 @@ CURRENT=${BEGIN}
 IsSimulation=0
 IsFirstBackup=0
 
+echo "======================DEFAULTS============================================"
+printf "\n"
 printf " Questi sono i valori iniziali di :\n"
-printf " NAME = %s\n", ${NAME}
-printf " SNAME = %s\n", ${SNAME}
-printf " VERSION = %s\n", ${VERSION}
+printf " NAME = %s\n" ${NAME}
+printf " SNAME = %s\n" ${SNAME}
+printf " VERSION = %s\n" ${VERSION}
 echo -e " GPLSPLASH = " ${GPLSPLASH}
 printf "\n"
-printf " ORIGIN = %s\n", ${ORIGIN}
-printf " DESTDIR = %s\n", ${DESTDIR}
-printf " CONFDIR = %s\n", ${CONFDIR}
-printf " CONFIG_FILE = %s\n", ${CONFIG_FILE}
-printf " LOG_FILE = %s\n", ${LOG_FILE}
-printf " EXCLUSION_FILE = %s\n", ${EXCLUSION_FILE}
+printf " ORIGIN = %s\n" ${ORIGIN}
+printf " DESTDIR = %s\n" ${DESTDIR}
+printf " CONFDIR = %s\n" ${CONFDIR}
+printf " CONFIG_FILE = %s\n" ${CONFIG_FILE}
+printf " LOG_FILE = %s\n" ${LOG_FILE}
+printf " EXCLUSION_FILE = %s\n" ${EXCLUSION_FILE}
 printf "\n"
-printf " BEGIN = %s\n", ${BEGIN}
-printf " CURRENT = %s\n", ${CURRENT}
+printf " BEGIN = %s\n" ${BEGIN}
+printf " CURRENT = %s\n" ${CURRENT}
 printf "\n"
-printf " IsFirstBackup = %c\n", ${IsFirstBackup}
-printf " IsSimulation = %c\n", ${IsSimulation}
-
+printf " IsFirstBackup = %c\n" ${IsFirstBackup}
+printf " IsSimulation = %c\n" ${IsSimulation}
+printf "\n"
+echo "=========================================================================="
 
 ###---= User Preferences =---###
-
+echo "===================USER Preferences======================================="
+printf "\n"
 # Check if the config directory exist, if not create one:
-[[ -d "${CONFDIR}" ]] || ( mkdir -p ${CONFDIR} && echo " confdir created" )
+( [[ -d "${CONFDIR}" ]] && echo " confdir found" ) || ( mkdir -p ${CONFDIR} && echo " confdir created" )
 
 # If present, source the "config" file and overwrite the defaults
-[[ -f "${CONFIG_FILE}" ]] && ( source ${CONFIG_FILE} && echo " config file found" )
-
+[[ -f "${CONFIG_FILE}" ]] && ( source ${CONFIG_FILE} && echo " config file found" ) || echo " no config file"
+printf "\n"
+echo "=========================================================================="
 
 ###---= Command line Flags =---###
 
@@ -98,13 +103,42 @@ while getopts ":C:c:e:ho:l:sV" option; do
         s) IsSimulation=1;;             # Simulation: rsync dry run
         V) echo -e "${NAME}: ${SNAME} "v"${VERSION}\n" ${GPLSPLASH}
             exit 0 ;;                   # Display version and License short blurp
-        \?) printf "%s: invalid option: -%c\n", ${SNAME}, ${OPTARG}
+        \?) printf "%s: invalid option: -%c\n" ${SNAME} ${OPTARG}
             exit 1 ;;
-        :) printf "%s: option -%c requires and argument.\n ", ${SNAME}, ${OPTARG}
+        :) printf "%s: option -%c requires and argument.\n " ${SNAME} ${OPTARG}
             exit 1;;
     esac
 done
 # The destination is mandatory unless it's set in the config file.
 shift $(( $OPTIND - 1 ))
-[[ "$1" ]] && DESTDIR=$1
+#( [[ "$1" ]] && DESTDIR=$1 ) || ( echo " Destdir not found"; exit 1 )
+if [[ -d "$1" ]] ; then
+    DESTDIR="$1"
+else
+    printf "%s: %s is not a valid directory\n" ${SNAME} "$1"
+    exit 1
+fi
+
+echo "======================Final values========================================"
+printf "\n"
+printf " Questi sono i valori finali di :\n"
+printf " NAME = %s\n" ${NAME}
+printf " SNAME = %s\n" ${SNAME}
+printf " VERSION = %s\n" ${VERSION}
+echo -e " GPLSPLASH = " ${GPLSPLASH}
+printf "\n"
+printf " ORIGIN = %s\n" ${ORIGIN}
+printf " DESTDIR = %s\n" ${DESTDIR}
+printf " CONFDIR = %s\n" ${CONFDIR}
+printf " CONFIG_FILE = %s\n" ${CONFIG_FILE}
+printf " LOG_FILE = %s\n" ${LOG_FILE}
+printf " EXCLUSION_FILE = %s\n" ${EXCLUSION_FILE}
+printf "\n"
+printf " BEGIN = %s\n" ${BEGIN}
+printf " CURRENT = %s\n" ${CURRENT}
+printf "\n"
+printf " IsFirstBackup = %c\n" ${IsFirstBackup}
+printf " IsSimulation = %c\n" ${IsSimulation}
+printf "\n"
+echo "=========================================================================="
 

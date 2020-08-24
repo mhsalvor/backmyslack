@@ -68,15 +68,13 @@ LOG_FILE="${CONFDIR}/bkms.log"
 EXCLUSION_FILE="${CONFDIR}/exclude"
 
 BEGIN=$(date +"%Y%m%d-%H%M")
-CURRENT=${BEGIN}
+CURRENT="${DESTDIR}/${BEGIN}"
 
 IsSimulation=0
 IsFirstBackup=0
 
 ###---= User Preferences =---###
 
-# Check if the config directory exist, if not create one:
-[[ -d "${CONFDIR}" ]] || mkdir -p ${CONFDIR}
 
 # If present, source the "config" file and overwrite the defaults
 [[ -f "${CONFIG_FILE}" ]] && source ${CONFIG_FILE}
@@ -123,17 +121,38 @@ while getopts ":C:c:e:ho:l:sVv" option; do
             exit 0;;                   # Display version and License short blurp
         v) show_help                    #TODO : Implement "verbose" mode.
             exit 0;;
-        \?) printf "%s: invalid option: -%c\n", ${SNAME}, ${OPTARG}
+        \?) printf "%s: invalid option: -%c\n" ${SNAME} ${OPTARG}
             exit 1;;
-        :) printf "%s: option -%c requires and argument.\n ", ${SNAME}, ${OPTARG}
+        :) printf "%s: option -%c requires and argument.\n " ${SNAME} ${OPTARG}
             exit 1;;
     esac
 done
 # The destination is mandatory unless it's set in the config file.
 shift $(( $OPTIND - 1 ))
-[[ "$1" ]] && DESTDIR=$1
+if [[ -d "$1" ]] ; then
+    DESTDIR="$1"
+else
+    printf " %s does not exist or is not a directory\n" "$1"
+    read -p " Do you want to create it? (y/N) " answer
+    case ${answer:0:1} in
+        y|Y|s|S) mkdir -p "${DESTDIR}" ;;
+        *) echo " Leaving ..."
+            exit 1;;
+    esac
+fi
 
 ###---= Configuration and Initializiation =---###
+
+# Check if the config directory exist, if not ask the user if he wants to create one:
+if [[ ! -d "${CONFDIR}" ]]; then
+    printf " %s does not exist or is not a directory.\n" ${CONFDIR}
+    read -p " Do you want to create it? (y/N) " answer
+    case ${answer:0:1} in
+        y|Y|s|S) mkdir -p "${CONFDIR}";;
+        * ) echo " Leaving..."
+            exit 1;;
+    esac
+fi
 
 # Check if there is an exclude file, if not, let the script know we need one.
 [[ -f "${EXCLUSION_FILE}" ]] || printf \
@@ -158,152 +177,46 @@ shift $(( $OPTIND - 1 ))
 /usr
 /var" > ${EXCLUSION_FILE}
 
+# Check if ORIGIN exists, it can be either a directory or a regular file.
+[[ ! -e "${ORIGIN}" ]] && ( echo -e "${ORIGIN} does not exist.\n Leaving ..." && exit 1 )
+
 # Find the older backups
-[[ -f "${DESTDIR}/old" ]] && OLD="${DESTDIR}/old"
-[[ -f "${DESTDIR}/archived" ]] && ARCHIVE="${DESTDIR}/archived"
+[[ -d "${DESTDIR}/old" ]] && OLD="${DESTDIR}/old"
+[[ -d "${DESTDIR}/archived" ]] && ARCHIVE="${DESTDIR}/archived"
 
 ###---= Rsync set up =---###
 
-RSYNC_CMD="ionice -c3 rsync"    # Don't stress the system
-RSYNC_OPT="-azhv --info=progress2,stats --info=name0 --del --exclude-from=${EXCLUSION_FILE}"
-RSYNC_SIM="${RSYNC_OPT} --dry-run"
+PREFIX="ionice -c3 rsync"    # Don't stress the system
+OPT1="--verbose --human-readable --compress --archive --info=progress2,stats,name0"
+OPT2="--delete-after --exclude-from=${EXCLUSION_FILE} --link-dest=${OLD}"
+RSYNC_CMD="${PREFIX} ${OPT1} ${OPT2}"
+RSYNC_SIM="${RSYNC_CMD} --dry-run"
 
+## The following is to be moved to MAIN
+if (( ${IsSimulation} == 1 )); then
+    printf " This is a simulation, no data will be tranfered and no backup will be created\n"
+    ${RSYNC_SIM} "${ORIGIN}" "${CURRENT}"
+    EXIT=$(echo $?)
+else
+    total="$( ${RSYNC_SIM} "${ORIGIN}" "${CURRENT}" | grep "total size" | awk '{print $4}' )"
+    printf " %s of data will be copied to %s\n" ${total} ${CURRENT}
+    read -p " Do you want to proceed? (y/N) " answer
+    case ${answer:0:1} in
+        y|Y|s|S) ##TODO: Make backup
+        *) echo " Leaving ..."
+            exit 1;;
+    esac
 
-#TODO=$($RSYNC_CMD $RSYNC_SYM "$ORIG"/ "$DESTDIR"/$NEW/ \
-#       |grep "^Number of regular files transferred:" | awk '{print $6}' )
-#TODO=$(du -s $ORIG | cut -f1)
-#echo $TODO
-#exit
-  $RSYNC_CMD $RSYNC_OPT "$ORIG"/ "$DESTDIR"/"$NEW"/
-#| pv -s "$TODO"
-  EXIT=$($ECHO_CMD $?)
 fi
-# Update the last backup file.
-$ECHO_CMD $NEW>"$LOGDIR"/last
-blankline
 
-#BUFFER_CMD="stdbuf -oL awk 'BEGIN { RS="\r" } /%/ { print $1" " $2 }' > /tmp/progress.txt"
-# columns 2 and 3
-#rsync --info=progress2,stats /path/to/source /path/to/target/ | stdbuf -oL awk 'BEGIN { RS="\r" } /%/ { print $1" "$2 }' > /tmp/progress.txt
-# example output
-#2% 100.08MB/s
+###---= Functions =---###
 
- # RSYNC="ionice -c3 rsync"
- # # don't use --progress
- # RSYNC_ARGS="-vrltD --delete --stats --human-readable"
- # SOURCES="/dir1 /dir2 /file3"
- # TARGET="storage::storage"
-# echo "Executing dry-run to see how many files must be transferred..."
-# TODO=$(${RSYNC} --dry-run ${RSYNC_ARGS} ${SOURCES} ${TARGET}|grep "^Number of files transferred"|awk '{print $5}')
-# ${RSYNC} ${RSYNC_ARGS} ${SOURCES} ${TARGET} | pv -l -e -p -s "$TODO"
-
-# progress = current_transfered*100/total_transfer(sim)
-
-#### # # % rsync -avvz --times --stats --checksum --human-readable --acls \
-#### # #     --itemize-changes --progress \
-#### # #     --out-format='[%t] [%i] (Last Modified: %M) (bytes: %-10l) %-100n' \
-#### # #     /usr/include/glib-2.0 my-glib-copy/
-#### # he switches breakdown as follows:
-####     -avvz = archive, verbose x 2, compress
-####     --times = preserve modification times
-####     --stats = give some file-transfer stats
-####     --checksum = skip based on checksum, not mod-time & size
-####     --human-readable = output numbers in a human-readable format
-####     --acls = preserve ACLs (implies -p)
-####     --itemize-changes = output a change-summary for all updates
-####     --progress = show progress during transfer
-####     --out-format='[%t] [%i] (Last Modified: %M) (bytes: %-10l) %-100n'
-####         %t = current date time
-####         %i = an itemized list of what is being updated
-####         %M = the last-modified time of the file
-####         %-10l = the length of the file in bytes (-10 is for alignment and precision)
-####         %-100n = the filename (short form; trailing "/" on dir) (-100 is for alignment and precision)
-####
-#### NOTE: See the man pages for rsync and rsyncd.conf for full details on the above switches.
-####
-###The above command produces the following transcript:
-###sending incremental file list
-###delta-transmission disabled for local transfer or --whole-file
-###[2012/12/23 21:34:46] [cd+++++++++] (Last Modified: 2010/12/19-08:13:31) (bytes: 4096      ) glib-2.0/
-###[2012/12/23 21:34:46] [>f+++++++++] (Last Modified: 2010/09/30-15:02:30) (bytes: 1511      ) glib-2.0/glib-object.h
-###       1.51K 100%    0.00kB/s    0:00:00
-###       1.51K 100%    0.00kB/s    0:00:00 (xfer#1, to-check=181/183)
-###[2012/12/23 21:34:46] [>f+++++++++] (Last Modified: 2010/09/30-15:02:30) (bytes: 2910      ) glib-2.0/glib.h
-###       2.91K 100%    2.78MB/s    0:00:00
-###       2.91K 100%    2.78MB/s    0:00:00 (xfer#2, to-check=180/183)
-###[2012/12/23 21:34:46] [>f+++++++++] (Last Modified: 2010/09/30-15:02:31) (bytes: 3613      ) glib-2.0/gmodule.h
-###       3.61K 100%    3.45MB/s    0:00:00
-###       3.61K 100%    3.45MB/s    0:00:00 (xfer#3, to-check=179/183)
-###...
-###...
-###[2012/12/23 21:34:46] [>f+++++++++] (Last Modified: 2010/09/30-15:02:31) (bytes: 8431      ) glib-2.0/gobject/gvaluecollector.h
-###       8.43K 100%  141.96kB/s    0:00:00
-###       8.43K 100%  141.96kB/s    0:00:00 (xfer#178, to-check=1/183)
-###[2012/12/23 21:34:46] [>f+++++++++] (Last Modified: 2010/09/30-15:02:31) (bytes: 8507      ) glib-2.0/gobject/gvaluetypes.h
-###       8.51K 100%  143.23kB/s    0:00:00
-###       8.51K 100%  143.23kB/s    0:00:00 (xfer#179, to-check=0/183)
-###total: matches=0  hash_hits=0  false_alarms=0 data=1305506
-###
-##rsync[2996] (sender) heap statistics:
-##  arena:         540672   (bytes from sbrk)
-##  ordblks:            3   (chunks not in use)
-##  smblks:             7
-##  hblks:              2   (chunks from mmap)
-##  hblkhd:        401408   (bytes from mmap)
-##  allmem:        942080   (bytes from sbrk + mmap)
-##  usmblks:            0
-##  fsmblks:          592
-##  uordblks:      404784   (bytes used)
-##  fordblks:      135888   (bytes free)
-##  keepcost:      134240   (bytes in releasable chunk)
-##
-#rsync[2999] (server receiver) heap statistics:
-#  arena:         286720   (bytes from sbrk)
-#  ordblks:            2   (chunks not in use)
-#  smblks:             8
-#  hblks:              3   (chunks from mmap)
-#  hblkhd:        667648   (bytes from mmap)
-#  allmem:        954368   (bytes from sbrk + mmap)
-#  usmblks:            0
-#  fsmblks:          672
-#  uordblks:      174480   (bytes used)
-#  fordblks:      112240   (bytes free)
-#  keepcost:      102352   (bytes in releasable chunk)
-##
-#rsync[2998] (server generator) heap statistics:
-#  arena:         233472   (bytes from sbrk)
-#  ordblks:            4   (chunks not in use)
-#  smblks:             6
-#  hblks:              2   (chunks from mmap)
-#  hblkhd:        401408   (bytes from mmap)
-#  allmem:        634880   (bytes from sbrk + mmap)
-#  usmblks:            0
-#  fsmblks:          448
-#  uordblks:       83152   (bytes used)
-#  fordblks:      150320   (bytes free)
-#  keepcost:      131120   (bytes in releasable chunk)
-##
-#Number of files: 183
-#Number of files transferred: 179
-#Total file size: 1.31M bytes
-#Total transferred file size: 1.31M bytes
-#Literal data: 1.31M bytes
-#Matched data: 0 bytes
-#File list size: 6.30K
-#File list generation time: 0.001 seconds
-#File list transfer time: 0.000 seconds
-#Total bytes sent: 350.39K
-#Total bytes received: 3.43K
-##
-#sent 350.39K bytes  received 3.43K bytes  707.64K bytes/sec
-#total size is 1.31M  speedup is 3.69
-#--------------------------------------------------------------------
 # Generates a thick line for the main banners, detects terminal width at creation
 function line {
-  local ncol=$($TPUT_CMD cols)
+  local ncol=$(tput cols)
   local count=2
   printf "+"
-    while [  $count -lt $ncol ]; do
+  while (( $count -lt $ncol )); do
       printf "="
       let count++
     done
@@ -312,10 +225,10 @@ function line {
 
 # Generates a thin line for secondary banners, detects terminal width at creation
 function subline {
-  local ncol=$($TPUT_CMD cols)
+  local ncol=$(tput cols)
   local count=2
   printf "+"
-    while [ $count -lt $ncol ]; do
+  while (( $count -lt $ncol )); do
       printf "-"
       let count++
     done
@@ -324,31 +237,35 @@ function subline {
 
 # Generates a special frame for error banners, detects terminal width at creation
 function errline {
-  local ncol=$($TPUT_CMD cols)
+  local ncol=$(tput cols)
   local count=6
   printf "!!>"
-    while [ $count -lt $ncol ]; do
+  while (( $count -lt $ncol )); do
      printf "-"
      let count++
     done
   printf "<!!\n"
 }
 
-# Just a void line: yes, I'm lazy this way.
+# Just a blank line: yes, I'm lazy this way.
 function blankline {
-  $ECHO_CMD ""
+  echo ""
 }
 
 # Takes in a text input and writes it on stdout, centered in respect to the terminal
 function ctext() {
   local text=$1
-  local tlen=${#text}
-  local ncol=$($TPUT_CMD cols)
-  local head=$((($tlen+$ncol-1)/2))
-  local tail=$((($ncol-$tlen)/2))
-  $PRINTF_CMD "|%*s" $head "$text"
-  $PRINTF_CMD "%*s\n" $tail "|"
+  local tlen=${#text} # the number of characthers of text
+  local ncol=$(tput cols)
+  local head=$((($tlen + $ncol - 1) / 2))
+  local tail=$((($ncol - $tlen) / 2))
+  printf "|%*s" $head "$text"
+  printf "%*s\n" $tail "|"
 }
+
+
+
+
 
 # Since there are a few times this script moves things around with no output, here's a spinner
 function spinner() {
@@ -453,53 +370,11 @@ $ECHO_CMD "# Backup procedure ended, preparing for feedback..."
 blankline
 
 
-function line {
-  local ncol=$($TPUT_CMD cols)
-  local count=2
-  printf "+"
-    while [  $count -lt $ncol ]; do
-      printf "="
-      let count++
-    done
-  printf "+\n"
-}
-
-function subline {
-  local ncol=$($TPUT_CMD cols)
-  local count=2
-  printf "+"
-    while [ $count -lt $ncol ]; do
-      printf "-"
-      let count++
-    done
-  printf "+\n"
-}
-
-function errline {
-  local ncol=$($TPUT_CMD cols)
-  local count=6
-  printf "!!>"
-    while [ $count -lt $ncol ]; do
-     printf "-"
-     let count++
-    done
-  printf "<!!\n"
-}
-
-function blankline {
-  $ECHO_CMD ""
-}
 
 
-function ctext() {
-  local text=$1
-  local tlen=${#text}
-  local ncol=$($TPUT_CMD cols)
-  local head=$((($tlen+$ncol-1)/2))
-  local tail=$((($ncol-$tlen)/2))
-  $PRINTF_CMD "|%*s" $head "$text"
-  $PRINTF_CMD "%*s\n" $tail "|"
-}
+
+
+
 
 function spinner() {
   $TPUT_CMD civis;
@@ -521,39 +396,9 @@ function spinner() {
 
 ###---= Functions =---###
 
-function line {
-  COUNTER=0
-  printf "+"
-    while [  $COUNTER -lt 80 ]; do
-      printf "="
-      let COUNTER=COUNTER+1
-    done
-  printf "+\n"
-}
 
-function subline {
-  COUNTER=0
-  printf "+"
-    while [ $COUNTER -lt 80 ]; do
-      printf "-"
-      let COUNTER=COUNTER+1
-    done
-  printf "+\n"
-}
 
-function errline {
-  COUNTER=0
-  printf "!!>"
-    while [ $COUNTER -lt 76 ]; do
-     printf "-"
-     let COUNTER=COUNTER+1
-    done
-  printf "<!!\n"
-}
 
-function blankline {
-  echo ""
-}
 
 # Check if a previous backup is present in DESTDIR. If none is found, mark the current one.
 function check_last() {
