@@ -75,37 +75,10 @@ IsFirstBackup=0
 
 ###---= User Preferences =---###
 
-
 # If present, source the "config" file and overwrite the defaults
 [[ -f "${CONFIG_FILE}" ]] && source ${CONFIG_FILE}
 
 ###---= Command line Flags =---###
-
-function show_help() {
-    cat << EOF
-Usage: ${SNAME} [-Vhs] [-C CONFDIR || -c CONFIG_FILE] [-e EXCLUSION_FILE] [-o ORIGIN] [-l LOG_FILE] [DESTDIR]
-
-Creates an incremental backup of ORIGIN in a directory under DESTDIR.
-
--C  Sets a custom configuration Directory. Default is \$XDG_CONFIG_HOME/backmyslack;
--c  Sets a custom configuration File. Default is \$XDG_CONFIG_HOME/backmyslack/config;
--e  Sets a custom exclusion file for the rsync command. A default and usually
-    sufficient file is created in  \$XDG_CONFIG_HOME/backmyslack/exclude the first
-    time this script is run;
--h  Displays this message amd exits;
--o  Sets a custom Origin. The value of PWD is used by default;
--l  Sets a custom logfile. Default is \$XDG_CONFIG_HOME/backmyslack/bkms.log;
--s  Simulation. Does not copy the files nor create the backup.
-    Useful for testing (uses rsync dry run option);
--V  Displays version and License informations.
-
-The Values of CONFDIR, CONFIG_FILE, EXCLUSION_FILE, ORIGIN, LOG_FILE and DESTDIR
-can be changed in the config file.
-
-Copyright (C) 2020  Giuseppe Molinaro (mhsalvor) - g.molinaro@linuxmail.org
-Released under: GNU GPL v2+
-EOF
-}
 
 while getopts ":C:c:e:ho:l:sVv" option; do
     case ${option} in
@@ -188,28 +161,39 @@ fi
 
 PREFIX="ionice -c3 rsync"    # Don't stress the system
 OPT1="--verbose --human-readable --compress --archive --info=progress2,stats,name0"
-OPT2="--delete-after --exclude-from=${EXCLUSION_FILE} --link-dest=${OLD}"
-RSYNC_CMD="${PREFIX} ${OPT1} ${OPT2}"
+OPT2="--delete-after --exclude-from=${EXCLUSION_FILE}"
+RSYNC_NEW="${PREFIX} ${OPT1} ${OPT2}"
+RSYNC_CMD="${RSYNC_NEW} --lind-dest=${OLD}"
 RSYNC_SIM="${RSYNC_CMD} --dry-run"
 
-## The following is to be moved to MAIN
-if (( ${IsSimulation} == 1 )); then
-    printf " This is a simulation, no data will be tranfered and no backup will be created\n"
-    ${RSYNC_SIM} "${ORIGIN}" "${CURRENT}"
-    EXIT=$(echo $?)
-else
-    total="$( ${RSYNC_SIM} "${ORIGIN}" "${CURRENT}" | grep "total size" | awk '{print $4}' )"
-    printf " %s of data will be copied to %s\n" ${total} ${CURRENT}
-    read -p " Do you want to proceed? (y/N) " answer
-    case ${answer:0:1} in
-        y|Y|s|S) ##TODO: Make backup
-        *) echo " Leaving ..."
-            exit 1;;
-    esac
-
-fi
 
 ###---= Functions =---###
+
+function show_help {
+    cat << EOF
+Usage: ${SNAME} [-Vhs] [-C CONFDIR || -c CONFIG_FILE] [-e EXCLUSION_FILE] [-o ORIGIN] [-l LOG_FILE] [DESTDIR]
+
+Creates an incremental backup of ORIGIN in a directory under DESTDIR.
+
+-C  Sets a custom configuration Directory. Default is \$XDG_CONFIG_HOME/backmyslack;
+-c  Sets a custom configuration File. Default is \$XDG_CONFIG_HOME/backmyslack/config;
+-e  Sets a custom exclusion file for the rsync command. A default and usually
+    sufficient file is created in  \$XDG_CONFIG_HOME/backmyslack/exclude the first
+    time this script is run;
+-h  Displays this message amd exits;
+-o  Sets a custom Origin. The value of PWD is used by default;
+-l  Sets a custom logfile. Default is \$XDG_CONFIG_HOME/backmyslack/bkms.log;
+-s  Simulation. Does not copy the files nor create the backup.
+    Useful for testing (uses rsync dry run option);
+-V  Displays version and License informations.
+
+The Values of CONFDIR, CONFIG_FILE, EXCLUSION_FILE, ORIGIN, LOG_FILE and DESTDIR
+can be changed in the config file.
+
+Copyright (C) 2020  Giuseppe Molinaro (mhsalvor) - g.molinaro@linuxmail.org
+Released under: GNU GPL v2+
+EOF
+}
 
 # Generates a thick line for the main banners, detects terminal width at creation
 function line {
@@ -286,28 +270,150 @@ function error_box() {
 
 # Since there are a few times this script moves things around with no output, here's a spinner
 function spinner() {
-  $TPUT_CMD civis; # turns the cursor invisible
-  local pid=$1
-  local delay=0.05
-    while [ $($PS_CMD -eo pid | $GREP_CMD $pid) ]; do
-      for i in \| / - \\; do
-       $PRINTF_CMD ' [%c]\b\b\b\b' $i
-       $SLEEP_CMD $delay
-      done
+    tput civis; # turns the cursor invisible
+    local pid=$1
+    local delay=0.05
+    while [ $(ps -eo pid | grep $pid) ]; do
+        for i in \| / - \\; do
+            tput ' [%c]\b\b\b\b' $i
+            tput $delay
+        done
     done
-  $PRINTF_CMD '\b\b\b\b'
-  $TPUT_CMD cnorm; #turns the cursor visible again
+    printf '\b\b\b\b'
+    tput cnorm; #turns the cursor visible again
 }
 
-#------------------Script's Body ----------------------------------------------#
+# Check if a previous backup is present in DESTDIR. If none is found, mark the current one.
+function check_last {
+    [[ ! -f "${DESTDIR}/.last" ]] && echo ${BEGIN}>"${DESTDIR}/.last"
+    PREV=$(cat "${DESTDIR}/.last")
+}
+
+function check_root {
+    if (( $(id -u) != 0 )) ; then
+        blankline
+        error_box "Only Root can do this"
+        blankline
+        exit 1
+     else
+        echo "> OK"
+        blankline
+    fi
+}
+
+# Change permissions of DESTDIR.
+# To preserve the backup form tampering and accidental data loss, only Root should
+# have write permissions here. And only While the script is running.
+# I will revoke every w permission at the end.
+function check_destdir {
+    if [[ -d ${DESTDIR} ]] ; then
+        printf "# Your data will be saved inside %s\n", ${DESTDIR}
+        printf "# Root should have ownership and exclusive write permission on this container..."
+        chown root:root ${DESTDIR} && chmod 705 ${DESTDIR}
+    else
+        blankline
+        print_error "Destination not found. Exiting..."
+        blankline
+        exit 1
+    fi
+}
+
+# After we finish, the write permission should be revoked
+function close_destdir {
+    echo "# Nobody should be able nor need to write on this..."
+    chown root:root ${DESTDIR} && chmod 505 ${DESTDIR}
+}
+
+
+# TODO -- Find a better way to identify directories.
+# CURRENT : =BEGIN - is the new backup being made
+# PREV : =DESTDIR/.last Is the previous backup, likely the one we want to hardlink to.
+# OLD :  =DESTDIR/old The second oldest backup. PREV will be moved to this when a new backup is created
+# ARCHIVE : =DESTDIR/archived The oldest kept backup. OLD will be moved here and the last archive will be deleted
+#           when a new backup is created.
+#
+# if PREV exist, check for OLD
+#   if OLD exist, check for ARCHIVE
+#       if ARCHIVE exist
+#       remove it
+#   move OLD to ARCHIVE
+# move PREV to OLD
+# create CURRENT with hardlinks to PREV
+#else
+# create a new CURRENT.
+
+function rotate_backups {
+    if [[ -d ${PREV} ]] ; then
+        if [[ -d ${OLD} ]] ; then
+            if [[ -d ${ARCHIVE} ]] ; then
+                ageArch=$(cat "${ARCHIVE}/.age")
+                printf " > Removing archived %s backup...", ${ageArch}
+                rm -rf ${ARCHIVE}
+            fi
+            ageOld=$(cat "${OLD}/.age")
+            printf " > Moving old %s backup to archived...", ${ageOld}
+            mv ${OLD} ${ARCHIVE}
+        fi
+        agePrev=$(cat "${PREV}/.age")
+        printf " Previous backup was made on %s\n Moving it to old...", ${agePrev}
+        echo ${PREV} > "${PREV}/.age"
+        mv ${PREV} ${OLD}
+        IsFirstBackup=0
+    else
+        printf " No previous backups found in %s\n> A full backup will be created.", ${DESTDIR}
+        IsFirstBackup=1
+    fi
+}
+
+function make_linkedBk {
+    printf " > Creating Incremental backup: %s\n", ${CURRENT}
+    blankline
+    ${RSYNC_CMD} "${ORIGIN}" "${CURRENT}"
+    EXIT=$(echo $?)
+}
+
+function make_newBk {
+  echo "# No previous backups found."
+  echo " > A full backup will be created."
+  blankline
+  ${RSYNC_NEW} "${$ORIGIN}" "${CURRENT}"
+  EXIT=$(echo $?)
+}
+
+function make_simBk {
+    ${RSYNC_SIM} "${ORIGIN}" "${CURRENT}"
+    EXIT=$(echo $?)
+}
+
+function make_Bk {
+    if (( ${IsFirstBackup} == 0 )) ; then
+        make_linkedBk
+    else
+        make_newBk
+    fi
+}
+
+## The following is to be moved to MAIN
+if (( ${IsSimulation} == 1 )); then
+    printf " This is a simulation, no data will be tranfered and no backup will be created\n"
+    make_simBk
+else
+    total="$( ${RSYNC_SIM} "${ORIGIN}" "${CURRENT}" | grep "total size" | awk '{print $4}' )"
+    printf " %s of data will be copied to %s\n" ${total} ${CURRENT}
+    read -p " Do you want to proceed? (y/N) " answer
+    case ${answer:0:1} in
+        y|Y|s|S) make_Bk ;;
+        *) echo " Leaving ..."
+            exit 1;;
+    esac
+
+fi
+
+###==== MAIN ====####
 
 # Let the user know when the backup process is starting
-BEGIN=$($DATE_CMD "+%a %x %X")
-line
-ctext "Backup starting on: $BEGIN"
-line
 blankline
-$ECHO_CMD "# $SNAME-$VERSION"
+print_title "Backup starting on: $BEGIN"
 blankline
 
 # make sure we're running as root
@@ -393,148 +499,9 @@ blankline
 
 
 
-function spinner() {
-  $TPUT_CMD civis;
-  local pid=$1
-  local delay=0.05
-    while [ $($PS_CMD -eo pid | $GREP_CMD $pid) ]; do
-      for i in \| / - \\; do
-       $PRINTF_CMD ' [%c]\b\b\b\b' $i
-       $SLEEP_CMD $delay
-      done
-    done
-  $PRINTF_CMD '\b\b\b\b'
-  $TPUT_CMD cnorm;
-#debug entry, please remove
-#  $PRINTF_CMD "PIPPO"
-}
 
 
 
-###---= Functions =---###
-
-
-
-
-
-# Check if a previous backup is present in DESTDIR. If none is found, mark the current one.
-function check_last() {
-    [[ ! -f "${DESTDIR}/.last" ]] && echo ${BEGIN}>"${DESTDIR}/.last"
-    PREV=$(cat "${DESTDIR}/.last")
-}
-
-function check_root() {
-    if (( $(id -u) != 0 )) ; then
-        {
-            blankline
-            errline
-            echo "!! Only Root can do this."
-            errline
-            blankline
-            exit 1
-        }
-     else
-        {
-            echo "> OK"
-            blankline
-        }
-    fi
-}
-
-# Change permissions of DESTDIR.
-# To preserve the backup form tampering and accidental data loss, only Root should
-# have write permissions here. And only While the script is running.
-# I will revoke every w permission at the end.
-function check_destdir() {
-    if [[ -d ${DESTDIR} ]] ; then
-        {
-            printf "# Your data will be saved inside %s\n", ${DESTDIR}
-            printf "# Root should have ownership and exclusive write permission on this container..."
-            chown root:root ${DESTDIR} && chmod 705 ${DESTDIR}
-        }
-    else
-        {
-            blankline
-            errline
-            printf " !! Destination not found. Exiting..."
-            blankline
-            errline
-            exit 1
-        }
-    fi
-}
-
-# After we finish, the write permission should be revoked
-function close_destdir() {
-    echo "# Nobody should be able nor need to write on this..."
-    chown root:root ${DESTDIR} && chmod 505 ${DESTDIR}
-}
-
-
-# TODO -- Find a better way to identify directories.
-# CURRENT : =BEGIN - is the new backup being made
-# PREV : =DESTDIR/.last Is the previous backup, likely the one we want to hardlink to.
-# OLD :  =DESTDIR/old The second oldest backup. PREV will be moved to this when a new backup is created
-# ARCHIVE : =DESTDIR/archived The oldest kept backup. OLD will be moved here and the last archive will be deleted
-#           when a new backup is created.
-#
-# if PREV exist, check for OLD
-#   if OLD exist, check for ARCHIVE
-#       if ARCHIVE exist
-#       remove it
-#   move OLD to ARCHIVE
-# move PREV to OLD
-# create CURRENT with hardlinks to PREV
-#else
-# create a new CURRENT.
-
-function rotate_backups() {
-    if [[ -d ${PREV} ]] ; then
-        {
-            if [[ -d ${OLD} ]] ; then
-                {
-                    if [[ -d ${ARCHIVE} ]] ; then
-                        {
-                            ageArch=$(cat "${ARCHIVE}/.age")
-                            printf " > Removing archived %s backup...", ${ageArch}
-                            rm -rf ${ARCHIVE}
-                        }
-                    fi
-
-                    ageOld=$(cat "${OLD}/.age")
-                    printf " > Moving old %s backup to archived...", ${ageOld}
-                    mv ${OLD} ${ARCHIVE}
-                }
-            fi
-
-            agePrev=$(cat "${PREV}/.age")
-            printf " Previous backup was made on %s\n Moving it to old...", ${agePrev}
-            echo ${PREV} > "${PREV}/.age"
-            mv ${PREV} ${OLD}
-            IsFirstBackup=0
-        }
-    else
-        {
-            printf " No previous backups found in %s\n> A full backup will be created.", ${DESTDIR}
-            IsFirstBackup=1
-        }
-    fi
-}
-
-function make_linkedBk() {
-    printf " > Creating Incremental backup: %s\n", ${CURRENT}
-    blankline
-    ${RSYNC_CMD} ${RSYNC_OPT} --link-dest="${OLD}" "${ORIGIN}" "${CURRENT}"
-    EXIT=$(echo $?)
-    return ${EXIT}
-}
-
-function make_newBk() {
-  $ECHO_CMD "# No previous backups found."
-  $ECHO_CMD " > A full backup will be created."
-  blankline
-  $RSYNC_CMD $RSYNC_OPT "$ORIG"/ "$DESTDIR"/$NEW/
-  EXIT=$($ECHO_CMD $?)
 
 
 
