@@ -216,7 +216,7 @@ function line {
   local ncol=$(tput cols)
   local count=2
   printf "+"
-  while (( $count -lt $ncol )); do
+  while (( ${count} -lt ${ncol} )); do
       printf "="
       let count++
     done
@@ -228,7 +228,7 @@ function subline {
   local ncol=$(tput cols)
   local count=2
   printf "+"
-  while (( $count -lt $ncol )); do
+  while (( ${count} -lt ${ncol} )); do
       printf "-"
       let count++
     done
@@ -240,7 +240,7 @@ function errline {
   local ncol=$(tput cols)
   local count=6
   printf "!!>"
-  while (( $count -lt $ncol )); do
+  while (( ${count} -lt ${ncol} )); do
      printf "-"
      let count++
     done
@@ -254,18 +254,35 @@ function blankline {
 
 # Takes in a text input and writes it on stdout, centered in respect to the terminal
 function ctext() {
-  local text=$1
+  local text="$1"
   local tlen=${#text} # the number of characthers of text
   local ncol=$(tput cols)
-  local head=$((($tlen + $ncol - 1) / 2))
-  local tail=$((($ncol - $tlen) / 2))
-  printf "|%*s" $head "$text"
-  printf "%*s\n" $tail "|"
+  local head=$(( (${tlen} + ${ncol} - 1)/2 ))
+  local tail=$(( (${ncol} - ${tlen})/2 ))
+  printf "|%*s" ${head} "${text}"
+  printf "%*s\n" ${tail} "|"
 }
 
+# Prints a title box
+function title_box() {
+    line
+    ctext "$*"
+    line
+}
 
+# Prints a subtitle box
+function subtitle_box() {
+    subline
+    ctext "$*"
+    subline
+}
 
-
+# Prints an error box
+function error_box() {
+    errline
+    ctext "$*"
+    errline
+}
 
 # Since there are a few times this script moves things around with no output, here's a spinner
 function spinner() {
