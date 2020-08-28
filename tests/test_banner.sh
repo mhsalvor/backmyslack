@@ -17,7 +17,7 @@ function subline {
   printf "+"
   while [[ $count -lt $ncol ]]; do
       printf "-"
-      let count++
+      ((count++))
     done
   printf "+\n"
 }
@@ -42,10 +42,12 @@ function blankline {
 # Takes in a text input and writes it on stdout, centered in respect to the terminal
 function ctext() {
   local text="$1"
+  local head=0
+  local tail=0
   local tlen=${#text} # the number of characthers of text
   local ncol=$(tput cols)
-  local head=$(( (${tlen} + ${ncol} - 1)/2 ))
-  local tail=$(( (${ncol} - ${tlen})/2 ))
+  head=$(( (tlen + ncol - 1)/2 ))
+  tail=$(( (ncol - tlen)/2 ))
   printf "|%*s" $head "$text"
   printf "%*s\n" $tail "|"
 }

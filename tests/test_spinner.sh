@@ -6,7 +6,7 @@ spinner()
      local pid=$1
      local delay=0.05
      while [ $(ps -eo pid | grep $pid) ]; do
-          for i in \| / - \\; do
+    for i in \| / - \\; do
             printf ' [%c]\b\b\b\b' $i
             sleep $delay
           done
