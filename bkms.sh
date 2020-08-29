@@ -46,7 +46,7 @@
 
 NAME="backMySlack"
 SNAME="bkms"
-VERSION="0.3b1 beta"
+VERSION="0.1.3-beta"
 
 # Licence Informations:
 GPLSPLASH="
@@ -78,6 +78,8 @@ IsFirstBackup=0
 ###---= User Preferences =---###
 
 # If present, source the "config" file and overwrite the defaults
+# shellcheck disable=SC1091
+# shellcheck disable=SC1090
 [[ -f "${CONFIG_FILE}" ]] && source "${CONFIG_FILE}"
 
 ###---= Command line Flags =---###
@@ -203,7 +205,7 @@ function line {
     printf "+"
     while (( count < ncol )); do
         printf "="
-        let count++
+        ((count ++))
     done
     printf "+\n"
 }
@@ -216,7 +218,7 @@ function subline {
     printf "+"
     while (( count < ncol )); do
         printf "-"
-        let count++
+        ((count ++))
     done
     printf "+\n"
 }
@@ -229,7 +231,7 @@ function errline {
     printf "!!>"
     while (( count < ncol )); do
         printf "-"
-        let count++
+        ((count ++))
     done
     printf "<!!\n"
 }
@@ -241,17 +243,17 @@ function blankline {
 
 # Takes in a text input and writes it on stdout, centered in respect to the terminal
 function ctext() {
-    local head=0
-    local tail=0
+    local heads=0
+    local tails=0
     local ncol=0
     local tlen=0
     local text="$1"
-    local tlen=${#text} # the number of characthers of text
-    local ncol=$(tput cols)
-    local head=$(( ( tlen + ncol - 1 ) / 2 ))
-    local tail=$(( ( ncol - tlen ) / 2 ))
-    printf "|%*s" ${head} "${text}"
-    printf "%*s\n" ${tail} "|"
+    tlen=${#text} # the number of characthers of text
+    ncol=$(tput cols)
+    heads=$(( ( tlen + ncol - 1 ) / 2 ))
+    tails=$(( ( ncol - tlen ) / 2 ))
+    printf "|%*s" ${heads} "${text}"
+    printf "%*s\n" ${tails} "|"
 }
 
 # Prints a title box
@@ -280,7 +282,7 @@ function spinner() {
     tput civis; # turns the cursor invisible
     local pid=$1
     local delay=0.05
-    while [[ $(ps -eo pid | grep ${pid}) ]]; do
+    while [[ $(ps -eo pid | grep "${pid}") ]]; do
         for i in \| / - \\; do
             printf ' [%c]\b\b\b\b' $i
             sleep ${delay}
@@ -382,13 +384,13 @@ function rotate_backups {
 function make_linkedBk {
     printf "> Creating Incremental backup: %s\n" "${CURRENT}"
     blankline
-    ${RSYNC_CMD} --link-dest="../${OLD}" "${ORIGIN}" "${CURRENT}"
+    ${RSYNC_CMD} --link-dest="../${OLD}" "${ORIGIN}" "${CURRENT}" #link-dest is relative to target
     EXIT=$?
 }
 
 function make_newBk {
-    echo "> No previous backups found."
-    echo "> A full backup will be created.\n"
+    printf "> No previous backups found."
+    printf "> A full backup will be created.\n"
     blankline
     ${RSYNC_NEW} "${ORIGIN}" "${CURRENT}"
     EXIT=$?
@@ -400,8 +402,6 @@ function make_simBk {
     EXIT=$?
 }
 
-
-
 function make_Bk {
     if (( IsFirstBackup == 0 )) ; then
         make_linkedBk
@@ -409,7 +409,6 @@ function make_Bk {
         make_newBk
     fi
 }
-
 
 ###==== MAIN ====####
 
@@ -434,7 +433,7 @@ echo -e "> Looking for previous backups..."
 CURRENT="${BEGIN}"
 OLD="previous"
 ARCHIVE="archived"
-cd ${DESTDIR} || exit 1
+cd "${DESTDIR}" || exit 1
 rotate_backups
 blankline
 
@@ -499,6 +498,6 @@ printf "%s | %s | %s\n" "${BEGIN}" "${END}" "${ES}">>"${LOG_FILE}"
 # ----------- real time feedback ----------------------------------------------#
 # shows last logfile lines.
 MSG=$(tail -n1 "${LOG_FILE}")
-title_box "Operation completed: "${MSG}""
+title_box "Operation completed: %s" "${MSG}"
 # and that's it
 exit 0
