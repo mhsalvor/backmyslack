@@ -68,7 +68,7 @@ DESTDIR=""
 CONFDIR="${XDG_CONFIG_HOME}/backmyslack"
 CONFIG_FILE="${CONFDIR}/config"
 LOG_FILE="${CONFDIR}/bkms.log"
-EXCLUSION_FILE="${CONFDIR}/exclude"
+EXCLUSION_FILE="${CONFDIR}/exclude.list"
 
 BEGIN=$(date +"%Y%m%d-%H%M")
 
