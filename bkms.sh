@@ -44,6 +44,53 @@
 #
 ################################################################################
 
+###---= Privilege and enviroment Handling =---###
+#
+# Never allow running the whole script as root
+if [[ $EUID -eq 0 && -z "$BKMS_ALLOW_ROOT" ]]; then
+    echo "Do not run bkms.sh with sudo."
+    echo "It will request privileges automatically when needed."
+    exit 1
+fi
+
+# Resolve real user and home directory
+REAL_USER="${SUDO_USER:-$USER}"
+REAL_HOME="$(getent passwd "$REAL_USER" | cut -d: -f6)"
+
+export HOME="$REAL_HOME"
+export XDG_CONFIG_HOME="${XDG_CONFIG_HOME:-$HOME/.config}"
+export XDG_CACHE_HOME="${XDG_CACHE_HOME:-$HOME/.cache}"
+export XDG_DATA_HOME="${XDG_DATA_HOME:-$HOME/.local/share}"
+
+# Run commands as root only when needed
+sudo_run() {
+    if [[ $EUID -ne 0 ]]; then
+        sudo --preserve-env=HOME,XDG_CONFIG_HOME,XDG_CACHE_HOME,XDG_DATA_HOME "$@"
+    else
+        "$@"
+    fi
+}
+
+# One-time sudo authentication + keepalive
+ensure_sudo() {
+    sudo -v || exit 1
+    while true; do
+        sudo -n true
+        sleep 60
+        kill -0 "$$" || exit
+    done 2>/dev/null &
+}
+
+# Ensure sudo credentials are dropped immediately on exit
+cleanup_sudo() {
+    sudo -K 2>/dev/null || true
+}
+
+# Authenticate once, early
+ensure_sudo
+# nukes sudo credentials immediately on exit
+trap cleanup_sudo EXIT
+
 ###---= Strict mode + sane defaults =---###
 set -Eeuo pipefail
 IFS=$'\n\t'
@@ -84,18 +131,10 @@ of the GNU GPL v2 or later
 # Propmt creation helper
 # usage: confirm "message" || exit 1
 confirm() {
-    local propmpt="$1"
+    local prompt="$1"
     read -r -p "${prompt} (y/N)" answer
     [[ ${answer,,} =~ ^(y|Y|s|S)$ ]]
 }
-
-require_root() {
-    ((EUID == 0)) || {
-        error_box "Only root can do this"
-        exit 1
-    }
-}
-
 
 log_line() {
     printf "%s | %s | %s\n" "$BEGIN" "END" "$1" >>"$LOG_FILE"
@@ -119,24 +158,36 @@ spinner() {
 }
 
 ###---= UI helpers =---###
-line()      { printf '+%*s+\n' "$(( $(tput cols) -2 ))" '' | tr ' ' '='; }
-subline()   { printf '+%*s+\n' "$(( $(tput cols) -2 ))" '' | tr ' ' '-'; }
-errline()   { printf '!!>%*s<!!\n' "$(( $(tput cols) -6 ))" '' | tr ' ' '-';}
+line() { printf '+%*s+\n' "$(($(tput cols) - 2))" '' | tr ' ' '='; }
+subline() { printf '+%*s+\n' "$(($(tput cols) - 2))" '' | tr ' ' '-'; }
+errline() { printf '!!>%*s<!!\n' "$(($(tput cols) - 6))" '' | tr ' ' '-'; }
 blankline() { printf '\n'; }
 
 # Takes in a text input and writes it on stdout, centered in respect to the terminal
 ctext() {
     local text="$1"
-    local cols len pad 
+    local cols len pad
     len=${#text} # the number of characthers of text
     cols=$(tput cols)
-    pad=$(( (cols - len) / 2 ))
+    pad=$(((cols - len) / 2))
     printf "|%*s%s%*s|\n" "$pad" "" "$text" "$pad" ""
 }
 
-title_box()     { line; ctext "$*"; line; }
-subtitle_box()  { subline; ctext "$*"; subline; }
-error_box()     { errline; ctext "$*"; errline; }
+title_box() {
+    line
+    ctext "$*"
+    line
+}
+subtitle_box() {
+    subline
+    ctext "$*"
+    subline
+}
+error_box() {
+    errline
+    ctext "$*"
+    errline
+}
 
 ###---= Help =---###
 
@@ -172,19 +223,28 @@ EOF
 ###---= Argument Parsing =---##
 while getopts ":C:c:e:ho:l:sV" opt; do
     case ${opt} in
-        C)  CONFDIR="${OPTARG}" # Set custom config dir
-            CONFIG_FILE="${CONFDIR}/config"
-            LOG_FILE="${CONFDIR}/bkms.log" ;;
-        c)  CONFIG_FILE="${OPTARG}" ;;    # Set custom config file
-        e)  EXCLUSION_FILE="${OPTARG}" ;; # Set custom exlusion file
-        h)  show_help # Display the help message
-            exit 0 ;;
-        o)  ORIGIN="${OPTARG}" ;;   # Set custom backup origin
-        l)  LOG_FILE="${OPTARG}" ;; # Set custom logfile
-        s)  IsSimulation=1 ;;       # Simulation: rsync dry run
-        V)  printf "%s (%s) v%s\n%s\n" ${NAME} ${SNAME} "${VERSION}" "${GPLSPLASH}"
-            exit 0 ;; # Display version and License short blurp
-        *)  show_help; exit 1 ;;
+    C)
+        CONFDIR="${OPTARG}" # Set custom config dir
+        CONFIG_FILE="${CONFDIR}/config"
+        LOG_FILE="${CONFDIR}/bkms.log"
+        ;;
+    c) CONFIG_FILE="${OPTARG}" ;;    # Set custom config file
+    e) EXCLUSION_FILE="${OPTARG}" ;; # Set custom exlusion file
+    h)
+        show_help # Display the help message
+        exit 0
+        ;;
+    o) ORIGIN="${OPTARG}" ;;   # Set custom backup origin
+    l) LOG_FILE="${OPTARG}" ;; # Set custom logfile
+    s) IsSimulation=1 ;;       # Simulation: rsync dry run
+    V)
+        printf "%s (%s) v%s\n%s\n" ${NAME} ${SNAME} "${VERSION}" "${GPLSPLASH}"
+        exit 0
+        ;; # Display version and License short blurp
+    *)
+        show_help
+        exit 1
+        ;;
     esac
 done
 
@@ -195,7 +255,12 @@ shift $((OPTIND - 1))
 DESTDIR="${1:-}"
 
 # If DESTDIR os a zero-lenght string something went wrong and we must exit.
-[[ -z "${DESTDIR}" ]] && { echo " Destination required"; exit 1; }
+[[ -z "${DESTDIR}" ]] && {
+    echo " Destination required"
+    blankline
+    show_help
+    exit 1
+}
 
 ###---= Prepare direcories =---###
 #
@@ -211,11 +276,11 @@ if [[ ! -d "${CONFDIR}" ]]; then
     printf "%s does not exist or is not a directory.\n" "${CONFDIR}"
     confirm "Create configuration direcoty in ${CONFDIR}?" || exit 1
     mkdir -p -- "${CONFDIR}"
-fi 
+fi
 
 # Check if there is an exclude file, if not, let the script know we need one.
-if [[ ! -f "${EXCLUSION_FILE}" ]];
-cat >"${EXCLUSION_FILE}"<<EOF
+if [[ ! -f "${EXCLUSION_FILE}" ]]; then
+    cat >"${EXCLUSION_FILE}" <<EOF
 /bin
 /dev
 /lib
@@ -240,8 +305,10 @@ EOF
 fi
 
 # Check if ORIGIN exists, it can be either a directory or a regular file.
-[[ ! -e "${ORIGIN}" ]] && { echo  "Origin does not exist.\n"; exit 1; }
-
+[[ ! -e "${ORIGIN}" ]] && {
+    echo "Origin does not exist.\n"
+    exit 1
+}
 
 ###---= Rsync setup =---###
 #
@@ -257,7 +324,7 @@ RSYNC_BASE=(
 )
 
 rsync_run() {
-    "${RSYNC_BASE[@]}" "$@"
+    sudo_run "${RSYNC_BASE[@]}" "$@"
 }
 
 ###---= Backup Rotation =---###
@@ -266,49 +333,63 @@ rsync_run() {
 
 readonly PREV_DIR="previous"
 readonly ARCHIVE_DIR="archived"
-CURRENT = "${BEGIN}"
+CURRENT="${BEGIN}"
+
+if [[ -f "$DESTDIR/.last)" ]]; then
+    LAST="$(cat "$DESTDIR/.last")"
+else
+    LAST=""
+fi
 
 rotate_backups() {
     cd "${DESTDIR}"
 
-    if [[ -d "${PREV_DIR}" ]]; then
-        if [[ -d "${ARCHIVE_DIR}" ]]; then
-                printf "> Removing archived backup\n"
-                rm -rf "${ARCHIVE_DIR}" & spinner $!
+    if [[ -d "${LAST}" ]]; then
+        if [[ -d "${PREV_DIR}" ]]; then
+            if [[ -d "${ARCHIVE_DIR}" ]]; then
+                sudo_run rm -rf "${ARCHIVE_DIR}" 2>/dev/null &
+                spinner $!
+            fi
+            sudo_run mv "${PREV_DIR}" "${ARCHIVE_DIR}" &
+            spinner $!
         fi
-        printf "> Moving archiving previous backup\n"
-        mv "${PREV_DIR}" "${ARCHIVE_DIR}" & spinner $!
+        sudo_run mv "${LAST}" "${PREV_DIR}" &
+        spinner $!
         IsFirstBackup=0
     else
-        printf "> No previous backups found in %s\n> A full backup will be created." "${DESTDIR}"
         IsFirstBackup=1
     fi
 }
 
 ###---= Backup Execution =---###
 make_backup() {
-    if (( IsSimulation )); then
+    cd "${DESTDIR}"
+    if ((IsSimulation)); then
         printf "> This is a simulation\n"
         printf "  No data will be transfered and no backup will be created\n"
         blankline
-        rsync_run --dry-run "${ORIGIN}" "${CURRENT}"
-    elif (( IsFirstBackup)); then
+        rsync_run --dry-run "${ORIGIN}" "${CURRENT}" &
+        spinner $!
+    elif ((IsFirstBackup)); then
         printf "> No previous backup found\n"
         printf "  A new backup will be created\n"
         blankline
         rsync_run "${ORIGIN}" "${CURRENT}"
     else
-        printf "> Creating Incrementa backup in %s\n" "${CURRENT}"
-        rsync_run --link-dest="../"${ARCHIVE_DIR}"" "${ORIGIN}" "${CURRENT}"
+        printf "> Creating Incremental backup in %s\n" "$DESTDIR/$CURRENT"
+        if [[ -d "${ARCHIVE_DIR}" ]]; then
+            rsync_run --link-dest="$DESTDIR/$ARCHIVE_DIR" "${ORIGIN}" "${CURRENT}"
+        else
+            rsync_run --link-dest="$DESTDIR/$PREV_DIR" "${ORIGIN}" "${CURRENT}"
+        fi
     fi
-    EXIT=$?
+    EXIT="$?"
 }
 
 ###---= MAIN =---###
 #
-# trap for unexpected errors 
+# trap for unexpected errors
 trap 'error_box "Unexpected error at line $LINENO" ' ERR
-
 
 # Let the user know when the backup process is starting
 blankline
@@ -317,29 +398,30 @@ blankline
 subtitle_box "Backup starting on: ${BEGIN}"
 blankline
 
-require_root
+sudo_run chown root:root "${DESTDIR}"
+sudo_run chmod 705 "${DESTDIR}"
 
-chown root:root "${DESTDIR}"
-chmod 705 "${DESTDIR}"
+rotate_backups
 
-if ! (( IsSimulation)); then
-    confirm "Proceed with backup?" || exit 1 
-fi 
+if ! ((IsSimulation)); then
+    confirm "Proceed with backup?" || exit 1
+fi
 
-make_backup 
+make_backup
 
-echo "${BEGIN}">""${DESTDIR}"/.last"
-echo "${BEGIN}">""${DESTDIR}"/"${CURRENT}"/.age"
+sudo_run echo "${BEGIN}" >""${DESTDIR}"/.last"
 
-chmod 505 "${DESTDIR}"
+[[ -d $DESTDIR/$CURRENT ]] && sudo_run echo "${BEGIN}" >"$DESTDIR/$CURRENT/.age"
 
-END="$(date + '%Y%m%d-%H%M')"
-subtitle_box "Backup finished at: %s" "${END}"
+sudo_run chmod 505 "${DESTDIR}"
+
+END="$(date +'%Y%m%d-%H%M')"
+subtitle_box "Backup finished at: $END"
 
 ###---= Exit Status Handling =---###
 case "$EXIT" in
-    0) ES="Success" ;;
-    *) ES="ERROR ($EXIT)" ;;
+0) ES="Success" ;;
+*) ES="ERROR ($EXIT)" ;;
 esac
 
 log_line "$ES"
