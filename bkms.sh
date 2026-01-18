@@ -158,9 +158,9 @@ spinner() {
 }
 
 ###---= UI helpers =---###
-line() { printf '+%*s+\n' "$(($(tput cols) - 2))" '' | tr ' ' '='; }
-subline() { printf '+%*s+\n' "$(($(tput cols) - 2))" '' | tr ' ' '-'; }
-errline() { printf '!!>%*s<!!\n' "$(($(tput cols) - 6))" '' | tr ' ' '-'; }
+line() { printf '+%*s+\n' "$(($(tput cols) - 1))" '' | tr ' ' '='; }
+subline() { printf '+%*s+\n' "$(($(tput cols) - 1))" '' | tr ' ' '-'; }
+errline() { printf '!!>%*s<!!\n' "$(($(tput cols) - 4))" '' | tr ' ' '-'; }
 blankline() { printf '\n'; }
 
 # Takes in a text input and writes it on stdout, centered in respect to the terminal
