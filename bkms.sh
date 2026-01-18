@@ -346,3 +346,5 @@ log_line "$ES"
 
 title_box "Operation completed: $ES"
 exit "$EXIT"
+
+# TODO: add dry-run diff summary
