@@ -249,6 +249,11 @@ rsync_run() {
 
 ###---= Functions =---###
 
+# logging helper
+function log() {
+    printf "%s | %s | %s\n" "$BEGIN" "END" "$1" >>"$LOG_FILE"
+}
+
 # Propmt creation helper
 # usage: confirm "message" || exit 1
 function confirm() {
