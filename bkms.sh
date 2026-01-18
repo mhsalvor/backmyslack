@@ -160,15 +160,24 @@ while getopts ":C:c:e:ho:l:sVv" option; do
 done
 # The destination is mandatory unless it's set in the config file.
 shift $((OPTIND - 1))
-if [[ -d "$1" ]]; then
-    DESTDIR="$1"
-else
-    printf " %s does not exist or is not a directory\n" "$1"
+# If Destdir is set in the configs, and not specified in the options, this
+# preserves the default.
+DESTDIR="${1:-}"
+
+# If DESTDIR os a zero-lenght string something went wrong and we must exit.
+if [[ -z "${DESTDIR}" ]]; then
+    printf " %s: destination directory required\n" "${SNAME}"
+    exit 1
+fi
+
+# Now we can be sure that DESTDIR is set and we can chesk if it's a valid dir
+if [[ ! -d "${DESTDIR}" ]]; then
+    printf "%s does not exist or is not a directory.\n" "${DESTDIR}"
     read -r -p " Do you want to create it? (y/N) " answer
-    case ${answer:0:1} in
-    y | Y | s | S) mkdir -p "${DESTDIR}" ;;
+    case ${answer,,} in
+    y | Y | s | S) mkdir -p -- "${DESTDIR}" ;;
     *)
-        echo " Leaving ..."
+        printf "Nothing to do."
         exit 1
         ;;
     esac
