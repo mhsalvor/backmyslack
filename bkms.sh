@@ -260,25 +260,9 @@ rsync_run() {
     "${RSYNC_BASE[@]}" "$@"
 }
 
-###---= Backup Rotation
+###---= Backup Rotation =---###
 #
 # TODO: -- Find a better way to identify directories.
-#
-# CURRENT : =BEGIN - is the new backup being made
-# PREV : =DESTDIR/.last Is the previous backup, likely the one we want to hardlink to.
-# OLD :  =DESTDIR/old The second oldest backup. PREV will be moved to this when a new backup is created
-# ARCHIVE : =DESTDIR/archived The oldest kept backup. OLD will be moved here and the last archive will be deleted
-#           when a new backup is created.
-#
-# if PREV exist, check for OLD
-#   if OLD exist, check for ARCHIVE
-#       if ARCHIVE exist
-#       remove it
-#   move OLD to ARCHIVE
-# move PREV to OLD
-# create CURRENT with hardlinks to PREV
-#else
-# create a new CURRENT.
 
 readonly PREV_DIR="previous"
 readonly ARCHIVE_DIR="archived"
@@ -300,69 +284,31 @@ rotate_backups() {
         IsFirstBackup=1
     fi
 }
---------------------------------------------------------------------------------
-###---= Add trap to catch Errors
-trap 'error_box "unexpected error at line $LINENO"; close_destdir || true' ERR
 
-
-
-
-# Change permissions of DESTDIR.
-# To preserve the backup form tampering and accidental data loss, only Root should
-# have write permissions here. And only While the script is running.
-# I will revoke every w permission at the end.
-function check_destdir {
-    if [[ -d ${DESTDIR} ]]; then
-        printf "> Your data will be saved inside %s\n" "${DESTDIR}"
-        printf "> Root should have ownership and exclusive write permission on this container...\n"
+###---= Backup Execution =---###
+make_backup() {
+    if (( IsSimulation )); then
+        printf "> This is a simulation\n"
+        printf "  No data will be transfered and no backup will be created\n"
         blankline
-        chown root:root "${DESTDIR}" && chmod 705 "${DESTDIR}"
+        rsync_run --dry-run "${ORIGIN}" "${CURRENT}"
+    elif (( IsFirstBackup)); then
+        printf "> No previous backup found\n"
+        printf "  A new backup will be created\n"
+        blankline
+        rsync_run "${ORIGIN}" "${CURRENT}"
     else
-        blankline
-        error_box "Destination not found. Exiting..."
-        blankline
-        exit 1
+        printf "> Creating Incrementa backup in %s\n" "${CURRENT}"
+        rsync_run --link-dest="../"${ARCHIVE_DIR}"" "${ORIGIN}" "${CURRENT}"
     fi
-}
-
-# After we finish, the write permission should be revoked
-function close_destdir {
-    echo "> Nobody should be able nor need to write on this..."
-    blankline
-    chown root:root "${DESTDIR}" && chmod 505 "${DESTDIR}"
-}
-
-
-function make_linkedBk {
-    printf "> Creating Incremental backup: %s\n" "${CURRENT}"
-    blankline
-    ${RSYNC_CMD} --link-dest="../${OLD}" "${ORIGIN}" "${CURRENT}" #link-dest is relative to target
     EXIT=$?
 }
 
-function make_newBk {
-    printf "> No previous backups found."
-    printf "> A full backup will be created.\n"
-    blankline
-    ${RSYNC_NEW} "${ORIGIN}" "${CURRENT}"
-    EXIT=$?
+###---= MAIN =---###
+#
+# trap for unexpected errors 
+trap 'error_box "Unexpected error at line $LINENO" ' ERR
 
-}
-
-function make_simBk {
-    ${RSYNC_SIM} "${ORIGIN}" "${CURRENT}"
-    EXIT=$?
-}
-
-function make_Bk {
-    if ((IsFirstBackup == 0)); then
-        make_linkedBk
-    else
-        make_newBk
-    fi
-}
-
-###==== MAIN ====####
 
 # Let the user know when the backup process is starting
 blankline
@@ -371,86 +317,32 @@ blankline
 subtitle_box "Backup starting on: ${BEGIN}"
 blankline
 
-# make sure we're running as root
-echo -e "> Checking for root..."
-check_root
+require_root
 
-# Change permissions and move to workdir:
-echo -e "> Checking target...\n"
-check_destdir
+chown root:root "${DESTDIR}"
+chmod 705 "${DESTDIR}"
 
-# Check for previous backups, and populate the history.
-# Also, register the exit status of rsync for the logfile and error detection.
-echo -e "> Looking for previous backups..."
-CURRENT="${BEGIN}"
-OLD="previous"
-ARCHIVE="archived"
-cd "${DESTDIR}" || exit 1
-rotate_backups
-blankline
+if ! (( IsSimulation)); then
+    confirm "Proceed with backup?" || exit 1 
+fi 
 
-# Starting proper backup procedure:
-if ((IsSimulation == 1)); then
-    printf " This is a simulation, no data will be tranfered and no backup will be created\n"
-    make_simBk
-else
-    total=$(${RSYNC_SIM} "${ORIGIN}" "${CURRENT}" | grep "total size" | awk '{print $4}')
-    printf " %s of data will be copied to %s\n" "${total}" "${CURRENT}"
-    read -r -p " Do you want to proceed? (y/N) " answer
-    case ${answer:0:1} in
-    y | Y | s | S) make_Bk ;;
-    *)
-        echo " Leaving ..."
-        exit 1
-        ;;
-    esac
-fi
+make_backup 
 
-# Update the last backup file.
-echo -e "${BEGIN}" >"${DESTDIR}/.last"
-echo -e "${BEGIN}" >"${CURRENT}/.age"
-blankline
-echo -e "> Closing Backup container..."
-close_destdir
+echo "${BEGIN}">""${DESTDIR}"/.last"
+echo "${BEGIN}">""${DESTDIR}"/"${CURRENT}"/.age"
 
-# Prafaring for final feedback and logging
-END=$(date +"%Y%m%d-%H%M")
-subtitle_box "Backup procedure ended at ${END}"
-blankline
+chmod 505 "${DESTDIR}"
 
-###---= Feedback and Logfile =---###
+END="$(date + '%Y%m%d-%H%M')"
+subtitle_box "Backup finished at: %s" "${END}"
 
-# Interprets the rsync exit code
+###---= Exit Status Handling =---###
 case "$EXIT" in
-0) ES="Success" ;;
-1) ES="ERROR: 1 - Syntax or usage error" ;;
-2) ES="ERROR: 2 - Protocol incompatibility" ;;
-3) ES="ERROR: 3 - Errors selecting input/output files, dirs" ;;
-4) ES="ERROR: 4 - Requested  action  not supported" ;;
-5) ES="ERROR: 5 - Error starting client-server protocol" ;;
-6) ES="ERROR: 6 - Daemon unable to append to log-file" ;;
-10) ES="ERROR: 10 - Error in socket I/O" ;;
-11) ES="ERROR: 11 - Error in file I/O" ;;
-12) ES="ERROR: 12 - Error in rsync protocol data stream" ;;
-13) ES="ERROR: 13 - Errors with program diagnostics" ;;
-14) ES="ERROR: 14 - Error in IPC code" ;;
-20) ES="ERROR: 20 - Received SIGUSR1 or SIGINT" ;;
-21) ES="ERROR: 21 - Some error returned by waitpid()" ;;
-22) ES="ERROR: 22 - Error allocating core memory buffers" ;;
-23) ES="ERROR: 23 - Partial transfer due to error" ;;
-24) ES="ERROR: 24 - Partial transfer due to vanished source files" ;;
-25) ES="ERROR: 25 - The --max-delete limit stopped deletions" ;;
-30) ES="ERROR: 30 - Timeout in data send/receive" ;;
-35) ES="ERROR: 35 - Timeout waiting for daemon connection" ;;
-*) ES="ERROR: ?? - An Unknown Error as occurred" ;;
+    0) ES="Success" ;;
+    *) ES="ERROR ($EXIT)" ;;
 esac
 
-# Appends a new line to the logfile:
-printf "%s | %s | %s\n" "${BEGIN}" "${END}" "${ES}" >>"${LOG_FILE}"
+log_line "$ES"
 
-# ----------- real time feedback ----------------------------------------------#
-# shows last logfile lines.
-MSG=$(tail -n1 "${LOG_FILE}")
-title_box "Operation completed: %s" "${MSG}"
-# and that's it
-exit 0
+title_box "Operation completed: $ES"
+exit "$EXIT"
