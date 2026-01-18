@@ -122,7 +122,7 @@ spinner() {
 line()      { printf '+%*s+\n' "$(( $(tput cols) -2 ))" '' | tr ' ' '='; }
 subline()   { printf '+%*s+\n' "$(( $(tput cols) -2 ))" '' | tr ' ' '-'; }
 errline()   { printf '!!>%*s<!!\n' "$(( $(tput cols) -6 ))" '' | tr ' ' '-';}
-blankline() {printf '\n';}
+blankline() { printf '\n'; }
 
 # Takes in a text input and writes it on stdout, centered in respect to the terminal
 ctext() {
@@ -140,7 +140,7 @@ error_box()     { errline; ctext "$*"; errline; }
 
 ###---= Help =---###
 
-show_help {
+show_help() {
     cat <<EOF
 Usage: ${SNAME} [-Vhs] [-C CONFDIR || -c CONFIG_FILE] [-e EXCLUSION_FILE] [-o ORIGIN] [-l LOG_FILE] [DESTDIR]
 
