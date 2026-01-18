@@ -55,11 +55,12 @@ IFS=$'\n\t'
 
 ###---= Add trap to catch Errors
 trap 'error_box "unexpected error at line $LINENO"; close_destdir || true' ERR
+
 ###---= Program maning and verion =---###
 
-NAME="backMySlack"
-SNAME="bkms"
-VERSION="0.1.3-beta"
+readonly NAME="backMySlack"
+readonly SNAME="bkms"
+readonly VERSION="0.1.3-beta"
 
 # Licence Informations:
 GPLSPLASH="
@@ -83,7 +84,7 @@ CONFIG_FILE="${CONFDIR}/config"
 LOG_FILE="${CONFDIR}/bkms.log"
 EXCLUSION_FILE="${CONFDIR}/exclude.list"
 
-BEGIN=$(date +"%Y%m%d-%H%M")
+readonly BEGIN=$(date +"%Y%m%d-%H%M")
 
 IsSimulation=0
 IsFirstBackup=0
