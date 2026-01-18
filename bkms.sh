@@ -53,6 +53,8 @@
 set -Eeuo pipefail
 IFS=$'\n\t'
 
+###---= Add trap to catch Errors
+trap 'error_box "unexpected error at line $LINENO"; close_destdir || true' ERR
 ###---= Program maning and verion =---###
 
 NAME="backMySlack"
