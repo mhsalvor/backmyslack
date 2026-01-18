@@ -235,6 +235,14 @@ RSYNC_SIM="${RSYNC_CMD} --dry-run"
 
 ###---= Functions =---###
 
+# Propmt creation helper
+# usage: confirm "message" || exit 1
+function confirm() {
+    local propmpt="$1"
+    read -r -p "${prompt} (y/N)" answer
+    [[ ${answer,,} =~ ^(y|Y|s|S)$ ]]
+}
+
 # Generates a thick line for the main banners, detects terminal width at creation
 function line {
     local ncol=0
