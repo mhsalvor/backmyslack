@@ -290,13 +290,13 @@ if [[ ! -f "${EXCLUSION_FILE}" ]]; then
 /opt
 /proc
 /sys
-/root 
+/root
 /run
-/sbin 
+/sbin
 /srv
-/tmp 
+/tmp
 /usr
-/var 
+/var
 /home/*/.gvfs
 /home/*/.cache
 /lost+found
