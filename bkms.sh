@@ -226,12 +226,22 @@ fi
 
 ###---= Rsync set up =---###
 
-PREFIX="ionice -c3 rsync" # Don't stress the system
-OPT1="--verbose --human-readable --compress --archive --info=progress2,stats,name0"
-OPT2="--delete-after --exclude-from=${EXCLUSION_FILE}"
-RSYNC_NEW="${PREFIX} ${OPT1} ${OPT2}"
-RSYNC_CMD="${RSYNC_NEW}"
-RSYNC_SIM="${RSYNC_CMD} --dry-run"
+RSYNC_BASE=(
+    ionice -c3 rsync
+    --archive
+    --human-readable
+    --compress
+    --delete-after
+    --info=progress2,stats,name0
+    --exclude-from="${EXCLUSION_FILE}"
+)
+
+rsync_run() {
+    "${RSYNC_BASE[@]}" "$@"
+}
+
+# Exambple: simulation
+# rsync_run --dry-run "$ORIGIN" "$CURRENT"
 
 ###---= Functions =---###
 
