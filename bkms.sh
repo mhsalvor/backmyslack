@@ -86,6 +86,10 @@ EXCLUSION_FILE="${CONFDIR}/exclude.list"
 
 readonly BEGIN=$(date +"%Y%m%d-%H%M")
 
+readonly PREV_DIR="previous"
+readonly OLD_DIR="old"
+readonly ARCHIVE_DIR="archived"
+
 IsSimulation=0
 IsFirstBackup=0
 
@@ -225,7 +229,7 @@ fi
 [[ ! -e "${ORIGIN}" ]] && (echo -e "${ORIGIN} does not exist.\n Leaving ..." && exit 1)
 
 ###---= Rsync set up =---###
-
+# This will avoid word-splitting bugs
 RSYNC_BASE=(
     ionice -c3 rsync
     --archive
