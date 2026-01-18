@@ -8,8 +8,8 @@
 #                                   __/ |
 #                                  |___/
 #
-#               BackMySlack - incremental backups made easy using rsync and
-#                             hardlinks.
+#   BackMySlack - incremental backups made easy using rsync and hardlinks.
+#
 #
 ############################# LICENSE ##########################################
 #
@@ -41,68 +41,106 @@
 # "rotating-filesystem-snapshot utility"
 # Many thanks to all the people who contribued to his original script
 # too (list on the Handy's webpage).
+#
+################################################################################
 
-###---= Add Strict mode + sane defaults
-
-# -E: any trap on ERR in inherited by shell finctions, command substitutions and
-#   subshells
-# -e: exit immidiatly if a pipeline or compound command returns a non-zero status
-# -u: treat (non special) unset parameters and variables as Errors
-# -o pipefail: return the exit value of the last command in a pipeline witha non
-#   zero extit value, or zero if all commands execute correclty.
+###---= Strict mode + sane defaults =---###
 set -Eeuo pipefail
 IFS=$'\n\t'
 
-###---= Add trap to catch Errors
-trap 'error_box "unexpected error at line $LINENO"; close_destdir || true' ERR
-
-###---= Program maning and verion =---###
-
+###---= Program info =---###
 readonly NAME="backMySlack"
 readonly SNAME="bkms"
-readonly VERSION="0.1.3-beta"
-
-# Licence Informations:
-GPLSPLASH="
-    Copyright (C) 2020  Giuseppe Molinaro (mhsalvor)
-
-This program is distributed in the hope that it will be useful,
-but WITHOUT ANY WARRANTY; without even the implied warranty of
-MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
-This is free software, and you are welcome to
-redistribute it under certain conditions;
-See the LICENSE files provided with this script
-Ot the GNU General Public Licence for more details.
-"
+readonly VERSION="0.1.4-beta"
 
 ###---= Defaults =---###
+readonly BEGIN=$(date +"%Y%m%d-%H%M")
 
 ORIGIN="${PWD}"
 DESTDIR=""
-CONFDIR="${XDG_CONFIG_HOME}/backmyslack"
+CONFDIR="${XDG_CONFIG_HOME:-$HOME/.config}/backmyslack"
 CONFIG_FILE="${CONFDIR}/config"
 LOG_FILE="${CONFDIR}/bkms.log"
 EXCLUSION_FILE="${CONFDIR}/exclude.list"
 
-readonly BEGIN=$(date +"%Y%m%d-%H%M")
-
-readonly PREV_DIR="previous"
-readonly OLD_DIR="old"
-readonly ARCHIVE_DIR="archived"
-
 IsSimulation=0
 IsFirstBackup=0
+EXIT=0
 
-###---= User Preferences =---###
+###---= License =---###
+GPLSPLASH="
+Copyright (C) 2020 Giuseppe Molinaro (mhsalvor)
 
-# If present, source the "config" file and overwrite the defaults
-# shellcheck disable=SC1091
-# shellcheck disable=SC1090
-[[ -f "${CONFIG_FILE}" ]] && source "${CONFIG_FILE}"
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.
 
-###---= Command line Flags =---###
+This is free software; you can redistribuite it and/or modify it under the terms
+of the GNU GPL v2 or later
+"
 
-function show_help {
+###---= Helpers =---###
+
+# Propmt creation helper
+# usage: confirm "message" || exit 1
+confirm() {
+    local propmpt="$1"
+    read -r -p "${prompt} (y/N)" answer
+    [[ ${answer,,} =~ ^(y|Y|s|S)$ ]]
+}
+
+require_root() {
+    ((EUID == 0)) || {
+        error_box "Only root can do this"
+        exit 1
+    }
+}
+
+
+log_line() {
+    printf "%s | %s | %s\n" "$BEGIN" "END" "$1" >>"$LOG_FILE"
+}
+
+# Since there are a few times this script moves things around with no output, here's a spinner
+spinner() {
+    local pid=$1
+    local delay=0.1
+    local spin='|/-\'
+
+    tput civis
+    while kill -0 "$pid" 2>/dev/null; do
+        for i in {0..3}; do
+            printf '\r [%c] ' "${spin:i:1}"
+            sleep "$delay"
+        done
+    done
+    printf '\r     \r'
+    tput cnorm
+}
+
+###---= UI helpers =---###
+line()      { printf '+%*s+\n' "$(( $(tput cols) -2 ))" '' | tr ' ' '='; }
+subline()   { printf '+%*s+\n' "$(( $(tput cols) -2 ))" '' | tr ' ' '-'; }
+errline()   { printf '!!>%*s<!!\n' "$(( $(tput cols) -6 ))" '' | tr ' ' '-';}
+blankline() {printf '\n';}
+
+# Takes in a text input and writes it on stdout, centered in respect to the terminal
+ctext() {
+    local text="$1"
+    local cols len pad 
+    len=${#text} # the number of characthers of text
+    cols=$(tput cols)
+    pad=$(( (cols - len) / 2 ))
+    printf "|%*s%s%*s|\n" "$pad" "" "$text" "$pad" ""
+}
+
+title_box()     { line; ctext "$*"; line; }
+subtitle_box()  { subline; ctext "$*"; subline; }
+error_box()     { errline; ctext "$*"; errline; }
+
+###---= Help =---###
+
+show_help {
     cat <<EOF
 Usage: ${SNAME} [-Vhs] [-C CONFDIR || -c CONFIG_FILE] [-e EXCLUSION_FILE] [-o ORIGIN] [-l LOG_FILE] [DESTDIR]
 
@@ -128,51 +166,45 @@ Released under: GNU GPL v2+
 EOF
 }
 
-while getopts ":C:c:e:ho:l:sVv" option; do
-    case ${option} in
-    C)
-        CONFDIR="${OPTARG}" # Set custom config dir
-        CONFIG_FILE="${CONFDIR}/config"
-        LOG_FILE="${CONFDIR}/bkms.log"
-        ;;
-    c) CONFIG_FILE="${OPTARG}" ;;    # Set custom config file
-    e) EXCLUSION_FILE="${OPTARG}" ;; # Set custom exlusion file
-    h)
-        show_help # Display the help message
-        exit 0
-        ;;
-    o) ORIGIN="${OPTARG}" ;;   # Set custom backup origin
-    l) LOG_FILE="${OPTARG}" ;; # Set custom logfile
-    s) IsSimulation=1 ;;       # Simulation: rsync dry run
-    V)
-        printf "%s: %s v%s\n%s" ${NAME} ${SNAME} "${VERSION}" "${GPLSPLASH}"
-        exit 0
-        ;; # Display version and License short blurp
-    v)
-        show_help #TODO : Implement "verbose" mode.
-        exit 0
-        ;;
-    \?)
-        printf "%s: invalid option: -%c\n" ${SNAME} "${OPTARG}"
-        exit 1
-        ;;
-    :)
-        printf "%s: option -%c requires and argument.\n " ${SNAME} "${OPTARG}"
-        exit 1
-        ;;
+###---= Load config if present =---###
+[[ -f "${CONFIG_FILE}" ]] && source "${CONFIG_FILE}"
+
+###---= Argument Parsing =---##
+while getopts ":C:c:e:ho:l:sV" opt; do
+    case ${opt} in
+        C)  CONFDIR="${OPTARG}" # Set custom config dir
+            CONFIG_FILE="${CONFDIR}/config"
+            LOG_FILE="${CONFDIR}/bkms.log" ;;
+        c)  CONFIG_FILE="${OPTARG}" ;;    # Set custom config file
+        e)  EXCLUSION_FILE="${OPTARG}" ;; # Set custom exlusion file
+        h)  show_help # Display the help message
+            exit 0 ;;
+        o)  ORIGIN="${OPTARG}" ;;   # Set custom backup origin
+        l)  LOG_FILE="${OPTARG}" ;; # Set custom logfile
+        s)  IsSimulation=1 ;;       # Simulation: rsync dry run
+        V)  printf "%s (%s) v%s\n%s\n" ${NAME} ${SNAME} "${VERSION}" "${GPLSPLASH}"
+            exit 0 ;; # Display version and License short blurp
+        *)  show_help; exit 1 ;;
     esac
 done
-# The destination is mandatory unless it's set in the config file.
+
 shift $((OPTIND - 1))
+# The destination is mandatory unless it's set in the config file.
 # If Destdir is set in the configs, and not specified in the options, this
 # preserves the default.
 DESTDIR="${1:-}"
 
 # If DESTDIR os a zero-lenght string something went wrong and we must exit.
-if [[ -z "${DESTDIR}" ]]; then
-    printf " %s: destination directory required\n" "${SNAME}"
-    exit 1
-fi
+[[ -z "${DESTDIR}" ]] && { echo " Destination required"; exit 1; }
+
+--------------------------------------------------------------------------------
+###---= Add trap to catch Errors
+trap 'error_box "unexpected error at line $LINENO"; close_destdir || true' ERR
+
+readonly PREV_DIR="previous"
+readonly OLD_DIR="old"
+readonly ARCHIVE_DIR="archived"
+
 
 # Now we can be sure that DESTDIR is set and we can chesk if it's a valid dir
 if [[ ! -d "${DESTDIR}" ]]; then
@@ -247,117 +279,7 @@ rsync_run() {
 # Exambple: simulation
 # rsync_run --dry-run "$ORIGIN" "$CURRENT"
 
-###---= Functions =---###
 
-# logging helper
-function log() {
-    printf "%s | %s | %s\n" "$BEGIN" "END" "$1" >>"$LOG_FILE"
-}
-
-# Propmt creation helper
-# usage: confirm "message" || exit 1
-function confirm() {
-    local propmpt="$1"
-    read -r -p "${prompt} (y/N)" answer
-    [[ ${answer,,} =~ ^(y|Y|s|S)$ ]]
-}
-
-# Generates a thick line for the main banners, detects terminal width at creation
-function line {
-    local ncol=0
-    ncol=$(tput cols)
-    local count=2
-    printf "+"
-    while ((count < ncol)); do
-        printf "="
-        ((count++))
-    done
-    printf "+\n"
-}
-
-# Generates a thin line for secondary banners, detects terminal width at creation
-function subline {
-    local ncol=0
-    ncol=$(tput cols)
-    local count=2
-    printf "+"
-    while ((count < ncol)); do
-        printf "-"
-        ((count++))
-    done
-    printf "+\n"
-}
-
-# Generates a special frame for error banners, detects terminal width at creation
-function errline {
-    local ncol=0
-    ncol=$(tput cols)
-    local count=6
-    printf "!!>"
-    while ((count < ncol)); do
-        printf "-"
-        ((count++))
-    done
-    printf "<!!\n"
-}
-
-# Just a blank line: yes, I'm lazy this way.
-function blankline {
-    echo ""
-}
-
-# Takes in a text input and writes it on stdout, centered in respect to the terminal
-function ctext() {
-    local heads=0
-    local tails=0
-    local ncol=0
-    local tlen=0
-    local text="$1"
-    tlen=${#text} # the number of characthers of text
-    ncol=$(tput cols)
-    heads=$(((tlen + ncol - 1) / 2))
-    tails=$(((ncol - tlen) / 2))
-    printf "|%*s" ${heads} "${text}"
-    printf "%*s\n" ${tails} "|"
-}
-
-# Prints a title box
-function title_box() {
-    line
-    ctext "$*"
-    line
-}
-
-# Prints a subtitle box
-function subtitle_box() {
-    subline
-    ctext "$*"
-    subline
-}
-
-# Prints an error box
-function error_box() {
-    errline
-    ctext "$*"
-    errline
-}
-
-# Since there are a few times this script moves things around with no output, here's a spinner
-function spinner() {
-    local pid=$1
-    local delay=0.1
-    local spin='|/-\'
-
-    tput civis
-    while kill -0 "$pid" 2>/dev/null; do
-        for i in {0..3}; do
-            printf '\r [%c] ' "${spin:i:1}"
-            sleep "$delay"
-        done
-    done
-    printf '\r     \r'
-    tput cnorm
-}
 
 # Check if a previous backup is present in DESTDIR. If none is found, mark the current one.
 function check_last {
@@ -367,18 +289,6 @@ function check_last {
         echo "${BEGIN}" >"${DESTDIR}/.last"
     fi
 
-}
-
-function check_root() {
-    if (($(id -u) != 0)); then
-        blankline
-        error_box "Only Root can do this."
-        blankline
-        exit 1
-    else
-        echo "> OK"
-        blankline
-    fi
 }
 
 # Change permissions of DESTDIR.
