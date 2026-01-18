@@ -369,7 +369,7 @@ function check_last {
 
 }
 
-function check_root {
+function check_root() {
     if (($(id -u) != 0)); then
         blankline
         error_box "Only Root can do this."
