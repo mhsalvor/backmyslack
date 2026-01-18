@@ -42,6 +42,17 @@
 # Many thanks to all the people who contribued to his original script
 # too (list on the Handy's webpage).
 
+###---= Add Strict mode + sane defaults
+
+# -E: any trap on ERR in inherited by shell finctions, command substitutions and
+#   subshells
+# -e: exit immidiatly if a pipeline or compound command returns a non-zero status
+# -u: treat (non special) unset parameters and variables as Errors
+# -o pipefail: return the exit value of the last command in a pipeline witha non
+#   zero extit value, or zero if all commands execute correclty.
+set -Eeuo pipefail
+IFS=$'\n\t'
+
 ###---= Program maning and verion =---###
 
 NAME="backMySlack"
@@ -85,7 +96,7 @@ IsFirstBackup=0
 ###---= Command line Flags =---###
 
 function show_help {
-    cat << EOF
+    cat <<EOF
 Usage: ${SNAME} [-Vhs] [-C CONFDIR || -c CONFIG_FILE] [-e EXCLUSION_FILE] [-o ORIGIN] [-l LOG_FILE] [DESTDIR]
 
 Creates an incremental backup of ORIGIN in a directory under DESTDIR.
@@ -112,37 +123,51 @@ EOF
 
 while getopts ":C:c:e:ho:l:sVv" option; do
     case ${option} in
-        C) CONFDIR="${OPTARG}"            # Set custom config dir
-            CONFIG_FILE="${CONFDIR}/config"
-            LOG_FILE="${CONFDIR}/bkms.log";;
-        c) CONFIG_FILE="${OPTARG}";;      # Set custom config file
-        e) EXCLUSION_FILE="${OPTARG}";;   # Set custom exlusion file
-        h) show_help                    # Display the help message
-            exit 0;;
-        o) ORIGIN="${OPTARG}";;           # Set custom backup origin
-        l) LOG_FILE="${OPTARG}";;         # Set custom logfile
-        s) IsSimulation=1;;             # Simulation: rsync dry run
-        V) printf "%s: %s v%s\n%s" ${NAME} ${SNAME} "${VERSION}" "${GPLSPLASH}"
-            exit 0;;                   # Display version and License short blurp
-        v) show_help                    #TODO : Implement "verbose" mode.
-            exit 0;;
-        \?) printf "%s: invalid option: -%c\n" ${SNAME} "${OPTARG}"
-            exit 1;;
-        :) printf "%s: option -%c requires and argument.\n " ${SNAME} "${OPTARG}"
-            exit 1;;
+    C)
+        CONFDIR="${OPTARG}" # Set custom config dir
+        CONFIG_FILE="${CONFDIR}/config"
+        LOG_FILE="${CONFDIR}/bkms.log"
+        ;;
+    c) CONFIG_FILE="${OPTARG}" ;;    # Set custom config file
+    e) EXCLUSION_FILE="${OPTARG}" ;; # Set custom exlusion file
+    h)
+        show_help # Display the help message
+        exit 0
+        ;;
+    o) ORIGIN="${OPTARG}" ;;   # Set custom backup origin
+    l) LOG_FILE="${OPTARG}" ;; # Set custom logfile
+    s) IsSimulation=1 ;;       # Simulation: rsync dry run
+    V)
+        printf "%s: %s v%s\n%s" ${NAME} ${SNAME} "${VERSION}" "${GPLSPLASH}"
+        exit 0
+        ;; # Display version and License short blurp
+    v)
+        show_help #TODO : Implement "verbose" mode.
+        exit 0
+        ;;
+    \?)
+        printf "%s: invalid option: -%c\n" ${SNAME} "${OPTARG}"
+        exit 1
+        ;;
+    :)
+        printf "%s: option -%c requires and argument.\n " ${SNAME} "${OPTARG}"
+        exit 1
+        ;;
     esac
 done
 # The destination is mandatory unless it's set in the config file.
-shift $(( OPTIND - 1 ))
-if [[ -d "$1" ]] ; then
+shift $((OPTIND - 1))
+if [[ -d "$1" ]]; then
     DESTDIR="$1"
 else
     printf " %s does not exist or is not a directory\n" "$1"
     read -r -p " Do you want to create it? (y/N) " answer
     case ${answer:0:1} in
-        y|Y|s|S) mkdir -p "${DESTDIR}" ;;
-        *) echo " Leaving ..."
-            exit 1;;
+    y | Y | s | S) mkdir -p "${DESTDIR}" ;;
+    *)
+        echo " Leaving ..."
+        exit 1
+        ;;
     esac
 fi
 
@@ -153,15 +178,17 @@ if [[ ! -d "${CONFDIR}" ]]; then
     printf " %s does not exist or is not a directory.\n" "${CONFDIR}"
     read -r -p " Do you want to create it? (y/N) " answer
     case ${answer:0:1} in
-        y|Y|s|S) mkdir -p "${CONFDIR}";;
-        * ) echo " Leaving..."
-            exit 1;;
+    y | Y | s | S) mkdir -p "${CONFDIR}" ;;
+    *)
+        echo " Leaving..."
+        exit 1
+        ;;
     esac
 fi
 
 # Check if there is an exclude file, if not, let the script know we need one.
 [[ -f "${EXCLUSION_FILE}" ]] || printf \
-"/bin
+    "/bin
 /dev
 /home/*/.gvfs
 /home/*/.cache
@@ -180,15 +207,14 @@ fi
 /sys
 /tmp
 /usr
-/var" > "${EXCLUSION_FILE}"
+/var" >"${EXCLUSION_FILE}"
 
 # Check if ORIGIN exists, it can be either a directory or a regular file.
-[[ ! -e "${ORIGIN}" ]] && ( echo -e "${ORIGIN} does not exist.\n Leaving ..." && exit 1 )
-
+[[ ! -e "${ORIGIN}" ]] && (echo -e "${ORIGIN} does not exist.\n Leaving ..." && exit 1)
 
 ###---= Rsync set up =---###
 
-PREFIX="ionice -c3 rsync"    # Don't stress the system
+PREFIX="ionice -c3 rsync" # Don't stress the system
 OPT1="--verbose --human-readable --compress --archive --info=progress2,stats,name0"
 OPT2="--delete-after --exclude-from=${EXCLUSION_FILE}"
 RSYNC_NEW="${PREFIX} ${OPT1} ${OPT2}"
@@ -203,9 +229,9 @@ function line {
     ncol=$(tput cols)
     local count=2
     printf "+"
-    while (( count < ncol )); do
+    while ((count < ncol)); do
         printf "="
-        ((count ++))
+        ((count++))
     done
     printf "+\n"
 }
@@ -216,9 +242,9 @@ function subline {
     ncol=$(tput cols)
     local count=2
     printf "+"
-    while (( count < ncol )); do
+    while ((count < ncol)); do
         printf "-"
-        ((count ++))
+        ((count++))
     done
     printf "+\n"
 }
@@ -229,9 +255,9 @@ function errline {
     ncol=$(tput cols)
     local count=6
     printf "!!>"
-    while (( count < ncol )); do
+    while ((count < ncol)); do
         printf "-"
-        ((count ++))
+        ((count++))
     done
     printf "<!!\n"
 }
@@ -250,8 +276,8 @@ function ctext() {
     local text="$1"
     tlen=${#text} # the number of characthers of text
     ncol=$(tput cols)
-    heads=$(( ( tlen + ncol - 1 ) / 2 ))
-    tails=$(( ( ncol - tlen ) / 2 ))
+    heads=$(((tlen + ncol - 1) / 2))
+    tails=$(((ncol - tlen) / 2))
     printf "|%*s" ${heads} "${text}"
     printf "%*s\n" ${tails} "|"
 }
@@ -279,7 +305,7 @@ function error_box() {
 
 # Since there are a few times this script moves things around with no output, here's a spinner
 function spinner() {
-    tput civis; # turns the cursor invisible
+    tput civis # turns the cursor invisible
     local pid=$1
     local delay=0.05
     while [[ $(ps -eo pid | grep "${pid}") ]]; do
@@ -289,26 +315,26 @@ function spinner() {
         done
     done
     printf '\b\b\b\b'
-    tput cnorm; #turns the cursor visible again
+    tput cnorm #turns the cursor visible again
 }
 
 # Check if a previous backup is present in DESTDIR. If none is found, mark the current one.
 function check_last {
-    if [[  -f "${DESTDIR}/.last" ]]; then
+    if [[ -f "${DESTDIR}/.last" ]]; then
         PREV=$(cat "${DESTDIR}/.last")
     else
-        echo "${BEGIN}">"${DESTDIR}/.last"
+        echo "${BEGIN}" >"${DESTDIR}/.last"
     fi
 
 }
 
 function check_root {
-    if (( $(id -u) != 0 )) ; then
+    if (($(id -u) != 0)); then
         blankline
         error_box "Only Root can do this."
         blankline
         exit 1
-     else
+    else
         echo "> OK"
         blankline
     fi
@@ -319,7 +345,7 @@ function check_root {
 # have write permissions here. And only While the script is running.
 # I will revoke every w permission at the end.
 function check_destdir {
-    if [[ -d ${DESTDIR} ]] ; then
+    if [[ -d ${DESTDIR} ]]; then
         printf "> Your data will be saved inside %s\n" "${DESTDIR}"
         printf "> Root should have ownership and exclusive write permission on this container...\n"
         blankline
@@ -338,7 +364,6 @@ function close_destdir {
     blankline
     chown root:root "${DESTDIR}" && chmod 505 "${DESTDIR}"
 }
-
 
 # TODO -- Find a better way to identify directories.
 # CURRENT : =BEGIN - is the new backup being made
@@ -359,21 +384,24 @@ function close_destdir {
 
 function rotate_backups {
     check_last
-    if [[ -d "${PREV}" ]] ; then
-        if [[ -d "${OLD}" ]] ; then
-            if [[ -d "${ARCHIVE}" ]] ; then
+    if [[ -d "${PREV}" ]]; then
+        if [[ -d "${OLD}" ]]; then
+            if [[ -d "${ARCHIVE}" ]]; then
                 ageArch=$(cat "${ARCHIVE}/.age")
                 printf "> Removing archived %s backup...\n" "${ageArch}"
-                rm -rf "${ARCHIVE}" & spinner $!
+                rm -rf "${ARCHIVE}" &
+                spinner $!
             fi
             ageOld=$(cat "${OLD}/.age")
             printf "> Moving old %s backup to archived...\n" "${ageOld}"
-            mv "${OLD}" "${ARCHIVE}" & spinner $!
+            mv "${OLD}" "${ARCHIVE}" &
+            spinner $!
         fi
         agePrev=$(cat "${PREV}/.age")
         printf "> Previous backup was made on %s\n Moving it to old...\n" "${agePrev}"
-        echo "${PREV}" > "${PREV}/.age"
-        mv "${PREV}" "${OLD}" & spinner $!
+        echo "${PREV}" >"${PREV}/.age"
+        mv "${PREV}" "${OLD}" &
+        spinner $!
         IsFirstBackup=0
     else
         printf "> No previous backups found in %s\n> A full backup will be created." "${DESTDIR}"
@@ -403,7 +431,7 @@ function make_simBk {
 }
 
 function make_Bk {
-    if (( IsFirstBackup == 0 )) ; then
+    if ((IsFirstBackup == 0)); then
         make_linkedBk
     else
         make_newBk
@@ -438,18 +466,20 @@ rotate_backups
 blankline
 
 # Starting proper backup procedure:
-if (( IsSimulation == 1 )); then
+if ((IsSimulation == 1)); then
     printf " This is a simulation, no data will be tranfered and no backup will be created\n"
     make_simBk
 else
-    total=$( ${RSYNC_SIM} "${ORIGIN}" "${CURRENT}" | grep "total size" | awk '{print $4}' )
+    total=$(${RSYNC_SIM} "${ORIGIN}" "${CURRENT}" | grep "total size" | awk '{print $4}')
     printf " %s of data will be copied to %s\n" "${total}" "${CURRENT}"
     read -r -p " Do you want to proceed? (y/N) " answer
     case ${answer:0:1} in
-            y|Y|s|S) make_Bk ;;
-            *) echo " Leaving ..."
-                exit 1;;
-        esac
+    y | Y | s | S) make_Bk ;;
+    *)
+        echo " Leaving ..."
+        exit 1
+        ;;
+    esac
 fi
 
 # Update the last backup file.
@@ -464,36 +494,35 @@ END=$(date +"%Y%m%d-%H%M")
 subtitle_box "Backup procedure ended at ${END}"
 blankline
 
-
 ###---= Feedback and Logfile =---###
 
 # Interprets the rsync exit code
 case "$EXIT" in
-    0) ES="Success";;
-    1) ES="ERROR: 1 - Syntax or usage error";;
-    2) ES="ERROR: 2 - Protocol incompatibility";;
-    3) ES="ERROR: 3 - Errors selecting input/output files, dirs";;
-    4) ES="ERROR: 4 - Requested  action  not supported";;
-    5) ES="ERROR: 5 - Error starting client-server protocol";;
-    6) ES="ERROR: 6 - Daemon unable to append to log-file";;
-    10) ES="ERROR: 10 - Error in socket I/O";;
-    11) ES="ERROR: 11 - Error in file I/O";;
-    12) ES="ERROR: 12 - Error in rsync protocol data stream";;
-    13) ES="ERROR: 13 - Errors with program diagnostics";;
-    14) ES="ERROR: 14 - Error in IPC code";;
-    20) ES="ERROR: 20 - Received SIGUSR1 or SIGINT";;
-    21) ES="ERROR: 21 - Some error returned by waitpid()";;
-    22) ES="ERROR: 22 - Error allocating core memory buffers";;
-    23) ES="ERROR: 23 - Partial transfer due to error";;
-    24) ES="ERROR: 24 - Partial transfer due to vanished source files";;
-    25) ES="ERROR: 25 - The --max-delete limit stopped deletions";;
-    30) ES="ERROR: 30 - Timeout in data send/receive";;
-    35) ES="ERROR: 35 - Timeout waiting for daemon connection";;
-    *) ES="ERROR: ?? - An Unknown Error as occurred";;
+0) ES="Success" ;;
+1) ES="ERROR: 1 - Syntax or usage error" ;;
+2) ES="ERROR: 2 - Protocol incompatibility" ;;
+3) ES="ERROR: 3 - Errors selecting input/output files, dirs" ;;
+4) ES="ERROR: 4 - Requested  action  not supported" ;;
+5) ES="ERROR: 5 - Error starting client-server protocol" ;;
+6) ES="ERROR: 6 - Daemon unable to append to log-file" ;;
+10) ES="ERROR: 10 - Error in socket I/O" ;;
+11) ES="ERROR: 11 - Error in file I/O" ;;
+12) ES="ERROR: 12 - Error in rsync protocol data stream" ;;
+13) ES="ERROR: 13 - Errors with program diagnostics" ;;
+14) ES="ERROR: 14 - Error in IPC code" ;;
+20) ES="ERROR: 20 - Received SIGUSR1 or SIGINT" ;;
+21) ES="ERROR: 21 - Some error returned by waitpid()" ;;
+22) ES="ERROR: 22 - Error allocating core memory buffers" ;;
+23) ES="ERROR: 23 - Partial transfer due to error" ;;
+24) ES="ERROR: 24 - Partial transfer due to vanished source files" ;;
+25) ES="ERROR: 25 - The --max-delete limit stopped deletions" ;;
+30) ES="ERROR: 30 - Timeout in data send/receive" ;;
+35) ES="ERROR: 35 - Timeout waiting for daemon connection" ;;
+*) ES="ERROR: ?? - An Unknown Error as occurred" ;;
 esac
 
 # Appends a new line to the logfile:
-printf "%s | %s | %s\n" "${BEGIN}" "${END}" "${ES}">>"${LOG_FILE}"
+printf "%s | %s | %s\n" "${BEGIN}" "${END}" "${ES}" >>"${LOG_FILE}"
 
 # ----------- real time feedback ----------------------------------------------#
 # shows last logfile lines.
