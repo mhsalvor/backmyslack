@@ -325,17 +325,19 @@ function error_box() {
 
 # Since there are a few times this script moves things around with no output, here's a spinner
 function spinner() {
-    tput civis # turns the cursor invisible
     local pid=$1
-    local delay=0.05
-    while [[ $(ps -eo pid | grep "${pid}") ]]; do
-        for i in \| / - \\; do
-            printf ' [%c]\b\b\b\b' $i
-            sleep ${delay}
+    local delay=0.1
+    local spin='|/-\'
+
+    tput civis
+    while kill -0 "$pid" 2>/dev/null; do
+        for i in {0..3}; do
+            printf '\r [%c] ' "${spin:i:1}"
+            sleep "$delay"
         done
     done
-    printf '\b\b\b\b'
-    tput cnorm #turns the cursor visible again
+    printf '\r     \r'
+    tput cnorm
 }
 
 # Check if a previous backup is present in DESTDIR. If none is found, mark the current one.
