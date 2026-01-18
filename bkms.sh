@@ -80,7 +80,7 @@ of the GNU GPL v2 or later
 "
 
 ###---= Helpers =---###
-
+#
 # Propmt creation helper
 # usage: confirm "message" || exit 1
 confirm() {
@@ -197,70 +197,54 @@ DESTDIR="${1:-}"
 # If DESTDIR os a zero-lenght string something went wrong and we must exit.
 [[ -z "${DESTDIR}" ]] && { echo " Destination required"; exit 1; }
 
---------------------------------------------------------------------------------
-###---= Add trap to catch Errors
-trap 'error_box "unexpected error at line $LINENO"; close_destdir || true' ERR
-
-readonly PREV_DIR="previous"
-readonly OLD_DIR="old"
-readonly ARCHIVE_DIR="archived"
-
-
-# Now we can be sure that DESTDIR is set and we can chesk if it's a valid dir
+###---= Prepare direcories =---###
+#
+# Chesk if DESTDIR exist and is a directory, prompt the user before creating it
 if [[ ! -d "${DESTDIR}" ]]; then
     printf "%s does not exist or is not a directory.\n" "${DESTDIR}"
-    read -r -p " Do you want to create it? (y/N) " answer
-    case ${answer,,} in
-    y | Y | s | S) mkdir -p -- "${DESTDIR}" ;;
-    *)
-        printf "Nothing to do."
-        exit 1
-        ;;
-    esac
+    confirm "Create destination "${DESTDIR}"?" || exit 1
+    mkdir -p -- "${DESTDIR}"
 fi
-
-###---= Configuration and Initializiation =---###
 
 # Check if the config directory exist, if not ask the user if he wants to create one:
 if [[ ! -d "${CONFDIR}" ]]; then
-    printf " %s does not exist or is not a directory.\n" "${CONFDIR}"
-    read -r -p " Do you want to create it? (y/N) " answer
-    case ${answer:0:1} in
-    y | Y | s | S) mkdir -p "${CONFDIR}" ;;
-    *)
-        echo " Leaving..."
-        exit 1
-        ;;
-    esac
-fi
+    printf "%s does not exist or is not a directory.\n" "${CONFDIR}"
+    confirm "Create configuration direcoty in ${CONFDIR}?" || exit 1
+    mkdir -p -- "${CONFDIR}"
+fi 
 
 # Check if there is an exclude file, if not, let the script know we need one.
-[[ -f "${EXCLUSION_FILE}" ]] || printf \
-    "/bin
+if [[ ! -f "${EXCLUSION_FILE}" ]];
+cat >"${EXCLUSION_FILE}"<<EOF
+/bin
 /dev
-/home/*/.gvfs
-/home/*/.cache
 /lib
 /lib64
-/lost+found
-/*/lost+found
 /media
 /mnt
 /opt
 /proc
-/root
-/run
-/sbin
-/srv
 /sys
-/tmp
+/root 
+/run
+/sbin 
+/srv
+/tmp 
 /usr
-/var" >"${EXCLUSION_FILE}"
+/var 
+/home/*/.gvfs
+/home/*/.cache
+/lost+found
+/*/lost+found
+EOF
+fi
 
 # Check if ORIGIN exists, it can be either a directory or a regular file.
-[[ ! -e "${ORIGIN}" ]] && (echo -e "${ORIGIN} does not exist.\n Leaving ..." && exit 1)
+[[ ! -e "${ORIGIN}" ]] && { echo  "Origin does not exist.\n"; exit 1; }
 
-###---= Rsync set up =---###
+
+###---= Rsync setup =---###
+#
 # This will avoid word-splitting bugs
 RSYNC_BASE=(
     ionice -c3 rsync
@@ -276,20 +260,52 @@ rsync_run() {
     "${RSYNC_BASE[@]}" "$@"
 }
 
-# Exambple: simulation
-# rsync_run --dry-run "$ORIGIN" "$CURRENT"
+###---= Backup Rotation
+#
+# TODO: -- Find a better way to identify directories.
+#
+# CURRENT : =BEGIN - is the new backup being made
+# PREV : =DESTDIR/.last Is the previous backup, likely the one we want to hardlink to.
+# OLD :  =DESTDIR/old The second oldest backup. PREV will be moved to this when a new backup is created
+# ARCHIVE : =DESTDIR/archived The oldest kept backup. OLD will be moved here and the last archive will be deleted
+#           when a new backup is created.
+#
+# if PREV exist, check for OLD
+#   if OLD exist, check for ARCHIVE
+#       if ARCHIVE exist
+#       remove it
+#   move OLD to ARCHIVE
+# move PREV to OLD
+# create CURRENT with hardlinks to PREV
+#else
+# create a new CURRENT.
 
+readonly PREV_DIR="previous"
+readonly ARCHIVE_DIR="archived"
+CURRENT = "${BEGIN}"
 
+rotate_backups() {
+    cd "${DESTDIR}"
 
-# Check if a previous backup is present in DESTDIR. If none is found, mark the current one.
-function check_last {
-    if [[ -f "${DESTDIR}/.last" ]]; then
-        PREV=$(cat "${DESTDIR}/.last")
+    if [[ -d "${PREV_DIR}" ]]; then
+        if [[ -d "${ARCHIVE_DIR}" ]]; then
+                printf "> Removing archived backup\n"
+                rm -rf "${ARCHIVE_DIR}" & spinner $!
+        fi
+        printf "> Moving archiving previous backup\n"
+        mv "${PREV_DIR}" "${ARCHIVE_DIR}" & spinner $!
+        IsFirstBackup=0
     else
-        echo "${BEGIN}" >"${DESTDIR}/.last"
+        printf "> No previous backups found in %s\n> A full backup will be created." "${DESTDIR}"
+        IsFirstBackup=1
     fi
-
 }
+--------------------------------------------------------------------------------
+###---= Add trap to catch Errors
+trap 'error_box "unexpected error at line $LINENO"; close_destdir || true' ERR
+
+
+
 
 # Change permissions of DESTDIR.
 # To preserve the backup form tampering and accidental data loss, only Root should
@@ -316,49 +332,6 @@ function close_destdir {
     chown root:root "${DESTDIR}" && chmod 505 "${DESTDIR}"
 }
 
-# TODO -- Find a better way to identify directories.
-# CURRENT : =BEGIN - is the new backup being made
-# PREV : =DESTDIR/.last Is the previous backup, likely the one we want to hardlink to.
-# OLD :  =DESTDIR/old The second oldest backup. PREV will be moved to this when a new backup is created
-# ARCHIVE : =DESTDIR/archived The oldest kept backup. OLD will be moved here and the last archive will be deleted
-#           when a new backup is created.
-#
-# if PREV exist, check for OLD
-#   if OLD exist, check for ARCHIVE
-#       if ARCHIVE exist
-#       remove it
-#   move OLD to ARCHIVE
-# move PREV to OLD
-# create CURRENT with hardlinks to PREV
-#else
-# create a new CURRENT.
-
-function rotate_backups {
-    check_last
-    if [[ -d "${PREV}" ]]; then
-        if [[ -d "${OLD}" ]]; then
-            if [[ -d "${ARCHIVE}" ]]; then
-                ageArch=$(cat "${ARCHIVE}/.age")
-                printf "> Removing archived %s backup...\n" "${ageArch}"
-                rm -rf "${ARCHIVE}" &
-                spinner $!
-            fi
-            ageOld=$(cat "${OLD}/.age")
-            printf "> Moving old %s backup to archived...\n" "${ageOld}"
-            mv "${OLD}" "${ARCHIVE}" &
-            spinner $!
-        fi
-        agePrev=$(cat "${PREV}/.age")
-        printf "> Previous backup was made on %s\n Moving it to old...\n" "${agePrev}"
-        echo "${PREV}" >"${PREV}/.age"
-        mv "${PREV}" "${OLD}" &
-        spinner $!
-        IsFirstBackup=0
-    else
-        printf "> No previous backups found in %s\n> A full backup will be created." "${DESTDIR}"
-        IsFirstBackup=1
-    fi
-}
 
 function make_linkedBk {
     printf "> Creating Incremental backup: %s\n" "${CURRENT}"
