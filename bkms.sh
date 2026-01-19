@@ -158,9 +158,9 @@ spinner() {
 }
 
 ###---= UI helpers =---###
-line() { printf '+%*s+\n' "$(($(tput cols) - 1))" '' | tr ' ' '='; }
-subline() { printf '+%*s+\n' "$(($(tput cols) - 1))" '' | tr ' ' '-'; }
-errline() { printf '!!>%*s<!!\n' "$(($(tput cols) - 4))" '' | tr ' ' '-'; }
+line() { printf '+%*s+\n' "$(($(tput cols) - 2))" '' | tr ' ' '='; }
+subline() { printf '+%*s+\n' "$(($(tput cols) - 2))" '' | tr ' ' '-'; }
+errline() { printf '!!>%*s<!!\n' "$(($(tput cols) - 6))" '' | tr ' ' '-'; }
 blankline() { printf '\n'; }
 
 # Takes in a text input and writes it on stdout, centered in respect to the terminal
@@ -297,10 +297,16 @@ if [[ ! -f "${EXCLUSION_FILE}" ]]; then
 /tmp
 /usr
 /var
+gvfs-metadata
+flatpack
 /home/*/.gvfs
 /home/*/.cache
+cache
+firefox-mpris
 /lost+found
 /*/lost+found
+/home/*/Games
+/games
 EOF
 fi
 
@@ -335,7 +341,7 @@ readonly PREV_DIR="previous"
 readonly ARCHIVE_DIR="archived"
 CURRENT="${BEGIN}"
 
-if [[ -f "$DESTDIR/.last)" ]]; then
+if [[ -f "$DESTDIR/.last" ]]; then
     LAST="$(cat "$DESTDIR/.last")"
 else
     LAST=""
@@ -401,17 +407,17 @@ blankline
 sudo_run chown root:root "${DESTDIR}"
 sudo_run chmod 705 "${DESTDIR}"
 
-rotate_backups
-
 if ! ((IsSimulation)); then
     confirm "Proceed with backup?" || exit 1
 fi
 
+rotate_backups
+
 make_backup
 
-sudo_run echo "${BEGIN}" >""${DESTDIR}"/.last"
+echo "${BEGIN}" | sudo_run tee "$DESTDIR/.last" >/dev/null
 
-[[ -d $DESTDIR/$CURRENT ]] && sudo_run echo "${BEGIN}" >"$DESTDIR/$CURRENT/.age"
+[[ -d $DESTDIR/$CURRENT ]] && echo "${BEGIN}" | sudo_run tee "$DESTDIR/$CURRENT/.age" >/dev/null
 
 sudo_run chmod 505 "${DESTDIR}"
 
