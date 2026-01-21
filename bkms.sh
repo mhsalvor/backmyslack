@@ -31,7 +31,7 @@
 #
 ################################################################################
 #
-# Author: Giuseppe (mhsalvor) Molinaro - g.molinaro@linuxmail.org
+## Author: Giuseppe (mhsalvor) Molinaro - g.molinaro@linuxmail.org
 #
 ## Acknowledgements:
 #
@@ -44,7 +44,7 @@
 #
 ################################################################################
 
-###---= Privilege and enviroment Handling =---###
+###---= Privilege and enviroment handling =---###
 #
 # Never allow running the whole script as root
 if [[ $EUID -eq 0 && -z "$BKMS_ALLOW_ROOT" ]]; then
@@ -137,7 +137,7 @@ confirm() {
 }
 
 log_line() {
-    printf "%s | %s | %s\n" "$BEGIN" "END" "$1" >>"$LOG_FILE"
+    printf "%s | %s | %s\n" "$BEGIN" "$END" "$1" >>"$LOG_FILE"
 }
 
 # Since there are a few times this script moves things around with no output, here's a spinner
