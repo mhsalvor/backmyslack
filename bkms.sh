@@ -329,8 +329,40 @@ RSYNC_BASE=(
     --exclude-from="${EXCLUSION_FILE}"
 )
 
+RSYNC_DIFF_FLAGS=(
+    --dry-run
+    --itemize-changes
+    --stats
+    --out-format='%i|%l%n'
+)
+
 rsync_run() {
     sudo_run "${RSYNC_BASE[@]}" "$@"
+}
+
+dry_run_summary() {
+    local tmpfile
+    tmpfile="$(mktemp)"
+
+    rsync_run "${RSYNC_DIFF_FLAGS[@]}" "${ORIGIN}" "${CURRENT}" >"$tmpfile"
+
+    local create update delete bytes
+
+    create=$(grep -cE '^\>f\+\+\+\+\+\+' "$tmpfile" || true)
+    update=$(grep -cE '^\>f' "$tmpfile" || true)
+    delete=$(grep -cE '^\*deleting' "$tmpfile" || true)
+    bytes=$(grep -E 'Total transferred file size: ' "$tmpfile" | awk '{print $5}')
+    # TODO: short and configurable list of changed paths
+
+    blankline
+    subtitle_box "Dry-run"
+    printf " Files to create : %s\n" "$create"
+    printf " Files to update : %s\n" "$update"
+    printf " Files to delete : %s\n" "$delete"
+    printf " Data to transfer: %s\n" "$(bytes:-0)"
+    blankline
+
+    rm -f "$tmpfile"
 }
 
 ###---= Backup Rotation =---###
