@@ -340,6 +340,7 @@ rsync_run() {
     sudo_run "${RSYNC_BASE[@]}" "$@"
 }
 
+###---= Dry-run Diff Summary =---#
 dry_run_summary() {
     local tmpfile
     tmpfile="$(mktemp)"
@@ -406,22 +407,27 @@ make_backup() {
         printf "> This is a simulation\n"
         printf "  No data will be transfered and no backup will be created\n"
         blankline
+        dry_run_summary
+        confirm "Show full dry-run output?" && \ 
         rsync_run --dry-run "${ORIGIN}" "${CURRENT}" &
         spinner $!
+        EXIT=0
     elif ((IsFirstBackup)); then
         printf "> No previous backup found\n"
         printf "  A new backup will be created\n"
         blankline
         rsync_run "${ORIGIN}" "${CURRENT}"
+        EXIT="$?"
     else
         printf "> Creating Incremental backup in %s\n" "$DESTDIR/$CURRENT"
         if [[ -d "${ARCHIVE_DIR}" ]]; then
             rsync_run --link-dest="$DESTDIR/$ARCHIVE_DIR" "${ORIGIN}" "${CURRENT}"
+            EXIT="$?"
         else
             rsync_run --link-dest="$DESTDIR/$PREV_DIR" "${ORIGIN}" "${CURRENT}"
+            EXIT="$?"
         fi
     fi
-    EXIT="$?"
 }
 
 ###---= MAIN =---###
@@ -467,4 +473,4 @@ log_line "$ES"
 title_box "Operation completed: $ES"
 exit "$EXIT"
 
-# TODO: add dry-run diff summary
+# TODO: add retention policy
