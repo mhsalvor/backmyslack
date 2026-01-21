@@ -344,7 +344,8 @@ rsync_run() {
 dry_run_summary() {
     local tmpfile
     tmpfile="$(mktemp)"
-
+    # confirm "Show full dry-run output?"
+    # || rsync_run --dry-run "${ORIGIN}" "${CURRENT}"
     rsync_run "${RSYNC_DIFF_FLAGS[@]}" "${ORIGIN}" "${CURRENT}" >"$tmpfile"
 
     local create update delete bytes
@@ -352,7 +353,7 @@ dry_run_summary() {
     create=$(grep -cE '^\>f\+\+\+\+\+\+' "$tmpfile" || true)
     update=$(grep -cE '^\>f' "$tmpfile" || true)
     delete=$(grep -cE '^\*deleting' "$tmpfile" || true)
-    bytes=$(grep -E 'Total transferred file size: ' "$tmpfile" | awk '{print $5}')
+    bytes=$(grep -E 'total size is ' "$tmpfile" | awk '{print $4}')
     # TODO: short and configurable list of changed paths
 
     blankline
@@ -360,7 +361,7 @@ dry_run_summary() {
     printf " Files to create : %s\n" "$create"
     printf " Files to update : %s\n" "$update"
     printf " Files to delete : %s\n" "$delete"
-    printf " Data to transfer: %s\n" "$(bytes:-0)"
+    printf " Data to transfer: %s\n" "${bytes:-0}"
     blankline
 
     rm -f "$tmpfile"
@@ -407,9 +408,7 @@ make_backup() {
         printf "> This is a simulation\n"
         printf "  No data will be transfered and no backup will be created\n"
         blankline
-        dry_run_summary
-        confirm "Show full dry-run output?" && \ 
-        rsync_run --dry-run "${ORIGIN}" "${CURRENT}" &
+        dry_run_summary &
         spinner $!
         EXIT=0
     elif ((IsFirstBackup)); then
@@ -453,9 +452,11 @@ rotate_backups
 
 make_backup
 
-echo "${BEGIN}" | sudo_run tee "$DESTDIR/.last" >/dev/null
-
-[[ -d $DESTDIR/$CURRENT ]] && echo "${BEGIN}" | sudo_run tee "$DESTDIR/$CURRENT/.age" >/dev/null
+if ! ((IsSimulation)); then
+    echo "${BEGIN}" | sudo_run tee "$DESTDIR/.last" >/dev/null
+    [[ -d $DESTDIR/$CURRENT ]] && echo "${BEGIN}" |
+        sudo_run tee "$DESTDIR/$CURRENT/.age" >/dev/null
+fi
 
 sudo_run chmod 505 "${DESTDIR}"
 
